@@ -19,6 +19,8 @@
 - Hook freshness window: `HOOK_FRESH_S = 15` seconds (hook state wins while newer than this).
 - No em-dash characters (`-` only) anywhere, including code comments and commit messages.
 - Follow existing code style: top-level free functions for pure logic, `actor Collector` owns cross-tick state, `@MainActor` `Store` owns UI state.
+- TEST EXECUTION (environment): this machine has Command Line Tools only, no Xcode, so `XCTest` and `swift test` are unavailable. Write the XCTest files exactly as specified (they run later in Xcode/CI), but VERIFY each task with `swift build` (which does not compile test targets and so is unaffected by the missing XCTest). Ignore the plan's `swift test --filter ...` / RED-GREEN commands; substitute `swift build` (expect: "Build complete!"). Reviewers: do not treat un-run tests as a defect here, but still read the test code for correctness.
+- Adding a `Dot` case requires updating every exhaustive switch over `Dot`: `Dot.glyph` (Models.swift) and `Theme.state(_:)` (Theme.swift). `waitingPermission` uses the amber `waiting` color (it is an attention state, not idle).
 
 ---
 
