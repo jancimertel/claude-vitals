@@ -4,9 +4,6 @@ A native macOS **menu-bar** app showing live Claude Code session status across e
 side-by-side cards with state, context-fill ring, and effort/cost. Reads `~/.claude` and the process
 list only. **No network, no API, no Apple Developer account.**
 
-This is the Swift rewrite of an earlier Python `rumps` prototype; the data layer was verified to
-match it exactly.
-
 ---
 
 ## Run
@@ -73,7 +70,7 @@ check spends ~1 token of your quota. First run may show a one-time Keychain prom
 
 ## How it works (data layer)
 
-Same sources as the Python prototype, all verified:
+Data sources, all verified:
 
 - **Live sessions** — `/usr/bin/pgrep -f 'native-binary/claude.*stream-json'` → PIDs;
   `/usr/sbin/lsof` → each PID's cwd. Liveness is matched to a session by **encoded project-dir name**
