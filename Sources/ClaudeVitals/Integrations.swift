@@ -16,11 +16,17 @@ final class Notifier: Sendable {
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
     }
 
-    func notifyWaiting(repo: String) {
+    func notify(_ alert: Alert) {
         guard AppEnv.isBundled else { return }
         let content = UNMutableNotificationContent()
-        content.title = repo
-        content.body = "Agent finished — waiting for your prompt"
+        switch alert.kind {
+        case .finished:
+            content.title = alert.repo
+            content.body = "Agent finished - waiting for your prompt"
+        case .needsPermission:
+            content.title = alert.repo
+            content.body = "Agent needs permission to continue"
+        }
         content.sound = nil   // NSSound already chimes; avoid a double-ding
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
         UNUserNotificationCenter.current().add(req)

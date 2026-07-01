@@ -1,22 +1,26 @@
 import AppKit
 import SwiftUI
 
-/// Edge detector: fire alerts only on running -> waiting transitions (not every poll).
+enum AlertKind: Sendable { case finished, needsPermission }
+struct Alert: Sendable, Equatable { let repo: String; let kind: AlertKind }
+
+/// Edge detector: fire alerts only on running -> waiting/permission transitions (not every poll).
 struct TransitionTracker {
     private var prev: [String: Dot] = [:]
 
-    mutating func update(_ blocks: [Block]) -> [String] {
-        var justWaiting: [String] = []
+    mutating func update(_ blocks: [Block]) -> [Alert] {
+        var alerts: [Alert] = []
         var seen = Set<String>()
         for b in blocks {
             seen.insert(b.sessionId)
-            if let was = prev[b.sessionId], was.isRunning, b.dot == .waiting {
-                justWaiting.append(b.repo)
+            if let was = prev[b.sessionId], was.isRunning {
+                if b.dot == .waitingPermission { alerts.append(Alert(repo: b.repo, kind: .needsPermission)) }
+                else if b.dot == .waiting { alerts.append(Alert(repo: b.repo, kind: .finished)) }
             }
             prev[b.sessionId] = b.dot
         }
         prev = prev.filter { seen.contains($0.key) }   // prune ended sessions
-        return justWaiting
+        return alerts
     }
 }
 
@@ -31,10 +35,25 @@ final class Store: ObservableObject {
     private var loop: Task<Void, Never>?
     private var usageLoop: Task<Void, Never>?
     private var lastUsageFetch: Date = .distantPast
+    private var socket: EventSocket?
 
-    init() { start(); startUsage() }
+    init() { start(); startUsage(); startSocket() }
 
-    deinit { loop?.cancel(); usageLoop?.cancel() }
+    isolated deinit { loop?.cancel(); usageLoop?.cancel(); socket?.stop() }
+
+    /// Hook events -> immediate targeted rebuild (no waiting for the poll tick).
+    private func startSocket() {
+        let s = EventSocket(path: VITALS_SOCK) { [weak self] e in
+            Task { @MainActor in await self?.handleHookEvent(e) }
+        }
+        s.start()
+        socket = s
+    }
+
+    private func handleHookEvent(_ e: HookEvent) async {
+        let snap = await collector.ingest(e)
+        apply(snap)
+    }
 
     private func start() {
         loop = Task { [weak self] in
@@ -43,7 +62,8 @@ final class Store: ObservableObject {
                 let s = await self.collector.snapshot()
                 self.apply(s)
                 let busy = s.running > 0 || s.subsRunning > 0
-                try? await Task.sleep(for: .seconds(busy ? 1.5 : 5))
+                let interval: Double = s.hookDriven ? 5 : (busy ? 1.5 : 5)
+                try? await Task.sleep(for: .seconds(interval))
             }
         }
     }
@@ -80,9 +100,9 @@ final class Store: ObservableObject {
     }
 
     private func apply(_ s: Snapshot) {
-        for repo in tracker.update(s.blocks) {
+        for alert in tracker.update(s.blocks) {
             Chime.play()
-            if AppEnv.isBundled { Notifier.shared.notifyWaiting(repo: repo) }
+            if AppEnv.isBundled { Notifier.shared.notify(alert) }
         }
         snap = s
         labelImage = renderLabelImage()
