@@ -108,7 +108,9 @@ struct Snapshot: Sendable {
     let subsRunning: Int
     let totalIn: Int, totalOut: Int, totalCw: Int, totalCr: Int
     let totalCost: Double
+    let hookDriven: Bool   // any card currently backed by fresh hook state
 
     static let empty = Snapshot(blocks: [], running: 0, subsRunning: 0,
-                                totalIn: 0, totalOut: 0, totalCw: 0, totalCr: 0, totalCost: 0)
+                                totalIn: 0, totalOut: 0, totalCw: 0, totalCr: 0, totalCost: 0,
+                                hookDriven: false)
 }

@@ -223,8 +223,9 @@ func liveSessionFiles(live: [String: Int]) -> Set<String> {
     return files
 }
 
-/// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus each live repo's active session (always).
-func candidateFiles(live: [String: Int]) -> Set<String> {
+/// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus each live repo's active session (always),
+/// plus any hook-seeded transcript paths (a brand-new session emits SessionStart before its file ages in).
+func candidateFiles(live: [String: Int], extra: Set<String> = []) -> Set<String> {
     let fm = FileManager.default
     let now = Date()
     var files = Set<String>()
@@ -239,8 +240,7 @@ func candidateFiles(live: [String: Int]) -> Set<String> {
             }
         }
     }
-    // A live agent's active session always shows, even if it's been quietly waiting longer than the grace.
-    return files.union(liveSessionFiles(live: live))
+    return files.union(liveSessionFiles(live: live)).union(extra.filter { FileManager.default.fileExists(atPath: $0) })
 }
 
 // MARK: - Cross-tick caches (actor-owned; bound the per-tick cost)
@@ -291,12 +291,14 @@ func parseSession(_ path: String, mtime m: Date, size: Int, cache: CollectorCach
 
 // MARK: - Snapshot assembly (the single source of truth)
 
-func buildSnapshot(parser: TranscriptParser, cache: CollectorCache) -> Snapshot {
+func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
+                   hooks: [String: HookStatus] = [:], hookFiles: Set<String> = []) -> Snapshot {
     let live = liveRepos(cache: cache)
     let activeFiles = liveSessionFiles(live: live)   // the exact session each live agent is driving
     let now = Date()
     var blocks: [Block] = []
-    let candidates = candidateFiles(live: live)
+    var anyHookDriven = false
+    let candidates = candidateFiles(live: live, extra: hookFiles)
 
     for f in candidates {
         guard let m = mtime(f) else { continue }
@@ -306,26 +308,27 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache) -> Snapshot 
         let (subsTotal, subsRunning) = deriveSubagents(f)
         let e = parser.effort(path: f)
 
-        // Per-session liveness: a card is "live" only if it's the session an alive `claude` process is
-        // actively driving. Project-level matching (dirName) still recovers cwd/pids when head lacks them.
-        let isLive = activeFiles.contains(f)
+        let sessionId = URL(fileURLWithPath: f).deletingPathExtension().lastPathComponent
+        let heuristicIsLive = activeFiles.contains(f)
         let dirName = URL(fileURLWithPath: f).deletingLastPathComponent().lastPathComponent
         let liveMatch = live.first { encodeRepo($0.key) == dirName }
         let cwd = headCwd.isEmpty ? (liveMatch?.key ?? "") : headCwd
         let repo = cwd.isEmpty ? dirName : URL(fileURLWithPath: cwd).lastPathComponent
 
-        let (dot, state) = deriveState(lastType: ps.lastType, lastStop: ps.lastStop, asksUser: ps.asksUser, age: age, isLive: isLive)
+        let heuristic = deriveState(lastType: ps.lastType, lastStop: ps.lastStop, asksUser: ps.asksUser, age: age, isLive: heuristicIsLive)
+        let resolved = resolveState(heuristic: (heuristic.0, heuristic.1), isLive: heuristicIsLive, hook: hooks[sessionId], now: now)
+        if resolved.usedHook { anyHookDriven = true }
 
         blocks.append(Block(
-            sessionId: URL(fileURLWithPath: f).deletingPathExtension().lastPathComponent,
+            sessionId: sessionId,
             repo: repo, cwd: cwd, branch: branch, age: Int(age),
-            dot: dot, state: state,
+            dot: resolved.dot, state: resolved.state,
             ctx: ps.ctx, ctxLimit: ps.ctxLimit, ctxPct: ps.ctxLimit > 0 ? Double(ps.ctx) / Double(ps.ctxLimit) * 100 : 0,
             model: ps.ctxModel == "?" ? e.model : ps.ctxModel,
             inTok: e.inTok, outTok: e.outTok, cw: e.cw, cr: e.cr, cost: e.cost,
             turns: e.turns, tools: e.tools,
             subsTotal: subsTotal, subsRunning: subsRunning,
-            live: isLive, pids: liveMatch?.value ?? 0))
+            live: resolved.live, pids: liveMatch?.value ?? 0))
     }
 
     cache.parsed = cache.parsed.filter { candidates.contains($0.key) }   // drop sessions out of the window
@@ -340,18 +343,32 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache) -> Snapshot 
         totalOut: blocks.reduce(0) { $0 + $1.outTok },
         totalCw: blocks.reduce(0) { $0 + $1.cw },
         totalCr: blocks.reduce(0) { $0 + $1.cr },
-        totalCost: blocks.reduce(0) { $0 + $1.cost })
+        totalCost: blocks.reduce(0) { $0 + $1.cost },
+        hookDriven: anyHookDriven)
 }
 
 /// One-shot (headless --dump): fresh caches, full parse once.
 func buildSnapshot() -> Snapshot { buildSnapshot(parser: TranscriptParser(), cache: CollectorCache()) }
 
 /// GUI path: persistent caches live inside the actor, so each refresh only re-reads files that
-/// changed and only `lsof`s newly-seen pids (effort stays O(appended bytes)).
+/// changed and only `lsof`s newly-seen pids (effort stays O(appended bytes)). Hook state also lives
+/// here so all state funnels through one actor (no extra locking).
 actor Collector {
     private let parser = TranscriptParser()
     private let cache = CollectorCache()
-    func snapshot() -> Snapshot { buildSnapshot(parser: parser, cache: cache) }
+    private var hooks: [String: HookStatus] = [:]
+    private var hookFiles: Set<String> = []
+
+    func snapshot() -> Snapshot { buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles) }
+
+    /// Fold one hook event into per-session state, seed its transcript as a candidate, and rebuild.
+    func ingest(_ e: HookEvent) -> Snapshot {
+        hooks[e.session_id] = applyHookEvent(hooks[e.session_id], e, at: Date())
+        if let tp = e.transcript_path { hookFiles.insert(tp) }
+        let cutoff = Date().addingTimeInterval(-RECENT_WINDOW)
+        hooks = hooks.filter { $0.value.at > cutoff }        // bound growth
+        return buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles)
+    }
 }
 
 // MARK: - Formatting (shared by --dump and the UI)
