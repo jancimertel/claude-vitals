@@ -1,0 +1,11 @@
+{
+  "name": "jancimertel",
+  "owner": { "name": "Janci Mertel" },
+  "plugins": [
+    {
+      "name": "claude-vitals",
+      "source": "./plugin/claude-vitals",
+      "description": "Live Claude Code session monitor: pushes lifecycle hook events to the Claude Vitals macOS menu-bar app for instant, accurate status."
+    }
+  ]
+}
