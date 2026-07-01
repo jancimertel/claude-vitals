@@ -1,9 +1,16 @@
 import AppKit
+import Foundation
 
 // @main lives here (NOT in a file named main.swift, and NOT on the SwiftUI App struct).
 @main
 struct Entry {
     static func main() {
+        if let i = CommandLine.arguments.firstIndex(of: "--emit"), i + 1 < CommandLine.arguments.count {
+            let event = CommandLine.arguments[i + 1]
+            let sid = (i + 2 < CommandLine.arguments.count) ? CommandLine.arguments[i + 2] : "debug-session"
+            emitDebug(event: event, sessionId: sid)
+            return
+        }
         if CommandLine.arguments.contains("--dump") {
             runDump()                                         // headless data-layer test, no GUI
             return
@@ -30,7 +37,27 @@ struct Entry {
             print("\nusage (live)  5h=\(f) (resets \(resetIn(u.fiveHReset) ?? "?"))  "
                 + "7d=\(w) (resets \(resetIn(u.sevenDReset) ?? "?"))  status=\(u.status ?? "?")")
         } else {
-            print("\nusage  (unavailable — token/network)")
+            print("\nusage  (unavailable - token/network)")
         }
+    }
+
+    static func emitDebug(event: String, sessionId: String) {
+        let json = #"{"hook_event_name":"\#(event)","session_id":"\#(sessionId)","tool_name":"Bash"}"#
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { print("socket() failed"); return }
+        var addr = sockaddr_un()
+        addr.sun_family = sa_family_t(AF_UNIX)
+        let sunPathSize = MemoryLayout.size(ofValue: addr.sun_path)
+        _ = withUnsafeMutablePointer(to: &addr.sun_path.0) { p in
+            VITALS_SOCK.withCString { strncpy(p, $0, sunPathSize - 1) }
+        }
+        let len = socklen_t(MemoryLayout<sockaddr_un>.size)
+        let r = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) { connect(fd, $0, len) }
+        }
+        if r != 0 { print("connect() failed - is the app running?"); close(fd); return }
+        _ = json.withCString { write(fd, $0, strlen($0)) }
+        close(fd)
+        print("emitted \(event) for \(sessionId)")
     }
 }
