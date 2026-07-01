@@ -206,6 +206,12 @@ struct SessionCardView: View {
                         Text(block.model.replacingOccurrences(of: "claude-", with: ""))
                             .font(.system(size: 10)).foregroundStyle(Theme.textTertiary).lineLimit(1)
                     }
+                    if !block.title.isEmpty {
+                        Text(block.title)
+                            .font(.system(size: 10)).italic()
+                            .foregroundStyle(Theme.textSecondary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
                 }
             }
 

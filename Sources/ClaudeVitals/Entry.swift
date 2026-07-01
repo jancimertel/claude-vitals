@@ -29,7 +29,8 @@ struct Entry {
                 + "ctx \(String(format: "%5.1f", b.ctxPct))%  "
                 + "\(human(b.inTok + b.outTok)) tok  $\(String(format: "%.2f", b.cost))  "
                 + "\(b.turns)t/\(b.tools)tools  sub \(b.subsRunning)/\(b.subsTotal)  "
-                + "\(b.branch)  \(b.age)s")
+                + "\(b.branch)  \(b.age)s"
+                + (b.title.isEmpty ? "" : "  \"\(b.title)\""))
         }
         if let u = RateLimitFetcher.fetchSync() {
             let f = u.fiveH.map { String(format: "%.0f%%", $0) } ?? "-"

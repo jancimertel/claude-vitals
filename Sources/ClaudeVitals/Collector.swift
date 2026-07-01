@@ -262,6 +262,7 @@ struct ParsedSession {
     let ctx: Int
     let ctxLimit: Int
     let ctxModel: String
+    let title: String        // Claude's auto chat title (from the last `ai-title` line), "" if none
 }
 
 /// Reused across refreshes inside the Collector actor so each tick only does work the filesystem
@@ -283,10 +284,11 @@ func parseSession(_ path: String, mtime m: Date, size: Int, cache: CollectorCach
         $0.type == "tool_use" && USER_PROMPT_TOOLS.contains($0.name ?? "")
     } ?? false
     let (ctx, limit, model) = deriveContext(lines)
+    let title = lines.last { $0.type == "ai-title" }?.aiTitle ?? ""
     let p = ParsedSession(mtime: m, size: size,
                           lastType: lastConv?.type, lastStop: lastConv?.message?.stop_reason,
                           asksUser: asksUser,
-                          ctx: ctx, ctxLimit: limit, ctxModel: model)
+                          ctx: ctx, ctxLimit: limit, ctxModel: model, title: title)
     cache.parsed[path] = p
     return p
 }
@@ -323,7 +325,7 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
 
         blocks.append(Block(
             sessionId: sessionId,
-            repo: repo, cwd: cwd, branch: branch, age: Int(age),
+            repo: repo, title: ps.title, cwd: cwd, branch: branch, age: Int(age),
             dot: resolved.dot, state: resolved.state,
             ctx: ps.ctx, ctxLimit: ps.ctxLimit, ctxPct: ps.ctxLimit > 0 ? Double(ps.ctx) / Double(ps.ctxLimit) * 100 : 0,
             model: ps.ctxModel == "?" ? e.model : ps.ctxModel,
