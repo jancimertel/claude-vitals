@@ -240,7 +240,9 @@ func candidateFiles(live: [String: Int], extra: Set<String> = []) -> Set<String>
             }
         }
     }
-    return files.union(liveSessionFiles(live: live)).union(extra.filter { FileManager.default.fileExists(atPath: $0) })
+    return files.union(liveSessionFiles(live: live)).union(extra.filter { p in
+        (mtime(p).map { now.timeIntervalSince($0) < RECENT_WINDOW }) ?? false
+    })
 }
 
 // MARK: - Cross-tick caches (actor-owned; bound the per-tick cost)
@@ -367,6 +369,7 @@ actor Collector {
         if let tp = e.transcript_path { hookFiles.insert(tp) }
         let cutoff = Date().addingTimeInterval(-RECENT_WINDOW)
         hooks = hooks.filter { $0.value.at > cutoff }        // bound growth
+        hookFiles = hookFiles.filter { (mtime($0).map { $0 > cutoff }) ?? false }   // bound growth
         return buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles)
     }
 }
