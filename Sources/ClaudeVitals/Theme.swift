@@ -48,11 +48,12 @@ enum Theme {
 
     static func state(_ d: Dot) -> Color {
         switch d {
-        case .runningModel: return runningModel
-        case .runningTool:  return runningTool
-        case .waiting:      return waiting
-        case .idle:         return idle
-        case .ended:        return idle
+        case .runningModel:      return runningModel
+        case .runningTool:       return runningTool
+        case .waiting:           return waiting
+        case .waitingPermission: return waiting
+        case .idle:              return idle
+        case .ended:             return idle
         }
     }
 }
