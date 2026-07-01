@@ -64,6 +64,9 @@ final class EventSocket {
     }
 
     func stop() {
+        // Closing the listening fd unblocks the accept() the loop is parked in (accept returns -1 ->
+        // loop ends). This relies on Darwin/BSD close-unblocks-accept semantics; fine for this
+        // macOS-only app, but note it is not POSIX-guaranteed (unreliable on Linux) if ever ported.
         if fd >= 0 { close(fd); fd = -1 }
         unlink(path)
     }
