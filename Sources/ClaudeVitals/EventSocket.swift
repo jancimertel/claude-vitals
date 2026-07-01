@@ -10,7 +10,6 @@ final class EventSocket {
     private let path: String
     private let onEvent: @Sendable (HookEvent) -> Void
     private var fd: Int32 = -1
-    private var running = false
     private let queue = DispatchQueue(label: "com.claudevitals.socket")
 
     init(path: String, onEvent: @escaping @Sendable (HookEvent) -> Void) {
@@ -38,12 +37,15 @@ final class EventSocket {
         }
         guard bound == 0, listen(fd, 32) == 0 else { close(fd); fd = -1; return }
 
-        running = true
-        queue.async { [weak self] in self?.acceptLoop() }
+        // Run the blocking accept loop off-main. Capture fd + onEvent by value (both Sendable) so the
+        // closure does not capture self. stop() closes fd, which makes accept() fail and ends the loop.
+        let listenFd = fd
+        let handler = onEvent
+        queue.async { EventSocket.acceptLoop(fd: listenFd, onEvent: handler) }
     }
 
-    private func acceptLoop() {
-        while running {
+    private static func acceptLoop(fd: Int32, onEvent: @Sendable (HookEvent) -> Void) {
+        while true {
             let client = accept(fd, nil, nil)
             if client < 0 { break }
             var data = Data()
@@ -62,7 +64,6 @@ final class EventSocket {
     }
 
     func stop() {
-        running = false
         if fd >= 0 { close(fd); fd = -1 }
         unlink(path)
     }
