@@ -54,9 +54,10 @@ func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookSt
     case "PreToolUse":        s.dot = .runningTool;  s.state = "running \(e.tool_name ?? "tool")"; s.toolName = e.tool_name
     case "PostToolUse":       s.dot = .runningModel; s.state = "running model"; s.toolName = nil
     case "PermissionRequest": s.dot = .waitingPermission; s.state = "needs permission"; s.toolName = e.tool_name
-    case "Notification":      s.dot = .waiting;      s.state = "waiting"
     case "Stop":              s.dot = .waiting;      s.state = "waiting prompt"; s.toolName = nil
-    case "SubagentStart", "SubagentStop": break   // no state change; timestamp advance keeps status fresh
+    // Notification is a backstop (PermissionRequest/Stop carry the real transitions); subagent events
+    // only trigger a re-parse. All three just refresh the timestamp (via s.at = now above), no state change.
+    case "Notification", "SubagentStart", "SubagentStop": break
     default: break
     }
     return s

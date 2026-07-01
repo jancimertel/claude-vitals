@@ -53,6 +53,15 @@ final class HookEventTests: XCTestCase {
         XCTAssertFalse(s.alive)
     }
 
+    func testNotificationDoesNotChangeStateWhileRunning() {
+        let running = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)
+        let later = t0.addingTimeInterval(2)
+        let s = applyHookEvent(running, HookEvent(event: "Notification", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil), at: later)
+        XCTAssertEqual(s.dot, .runningTool)   // unchanged - no false "finished" transition
+        XCTAssertEqual(s.state, "running Bash")
+        XCTAssertEqual(s.at, later)           // timestamp still advances (liveness backstop)
+    }
+
     func testSubagentEventsDoNotChangeStateButBumpTimestamp() {
         let base = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)
         let later = t0.addingTimeInterval(3)

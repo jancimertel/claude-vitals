@@ -61,7 +61,7 @@ Claude Code session ──(8 hook events)──► emit.sh ──nc -U──► 
 | `PreToolUse`                   | `runningTool` (+ exact tool_name)                   |
 | `PostToolUse`                  | back to `runningModel`                              |
 | `PermissionRequest`            | `waitingPermission` (new state - see below); authoritative permission signal |
-| `Notification`                 | `waiting` (backstop: Claude is blocked on the user)  |
+| `Notification`                 | no state change (timestamp-only liveness backstop)  |
 | `Stop`                         | `waiting` (waiting for prompt); fires the chime     |
 | `SubagentStart` / `SubagentStop` | subagent liveness count                           |
 
