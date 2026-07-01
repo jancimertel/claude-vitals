@@ -88,6 +88,21 @@ Polling is adaptive: **1.5s** while anything runs, **5s** idle. Parsing runs off
 
 ---
 
+## Fast triggers (optional plugin)
+
+For instant, precise status (permission prompts, turn/ tool transitions, subagent activity) install the
+bundled Claude Code plugin once:
+
+    /plugin install ./plugin/claude-vitals
+
+At user scope it applies to every session in every repo. Its hooks push lifecycle events over a Unix
+domain socket (`~/.claude-vitals/vitals.sock`) to the running app, which uses them as the authoritative,
+low-latency source of session state while the transcript stays the source of tokens/context/cost.
+Without the plugin the app falls back to transcript polling exactly as before. Disable anytime via
+`/plugin`.
+
+---
+
 ## Source map
 
 | File | Responsibility |

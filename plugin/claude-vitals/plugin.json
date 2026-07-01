@@ -1,0 +1,5 @@
+{
+  "name": "claude-vitals",
+  "version": "0.1.0",
+  "description": "Pushes Claude Code session lifecycle events to the Claude Vitals menu-bar app for instant status."
+}
