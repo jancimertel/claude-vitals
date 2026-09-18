@@ -35,6 +35,7 @@ func lsofCwd(_ pid: String) -> String {
     return ""
 }
 
+/// FALLBACK ONLY (see `liveness`): used when Claude Code has no session registry.
 /// repo cwd -> count of live interactive `claude` processes (absolute tool paths: .app PATH lacks /usr/sbin).
 ///
 /// `pgrep` is cheap and runs every tick; the per-pid `lsof` (the slow call) runs ONLY for pids we
@@ -223,9 +224,33 @@ func liveSessionFiles(live: [String: Int]) -> Set<String> {
     return files
 }
 
-/// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus each live repo's active session (always),
+/// Which sessions are live right now: the transcript each one drives, and a per-cwd session count.
+struct Liveness {
+    let files: Set<String>
+    let repos: [String: Int]
+}
+
+/// The session registry is the source of liveness: one entry per running session, keyed by session id,
+/// so several sessions in one repo are each live (the process scan could only bless the newest
+/// transcript per repo) and terminal sessions count too. No `pgrep`/`lsof` on this path. Without a
+/// registry directory (older Claude Code) the process scan below still drives everything.
+func liveness(cache: CollectorCache) -> Liveness {
+    guard let entries = readRegistry() else {
+        let repos = liveRepos(cache: cache)
+        return Liveness(files: liveSessionFiles(live: repos), repos: repos)
+    }
+    var files = Set<String>()
+    var repos: [String: Int] = [:]
+    for e in entries where isLiveEntry(e) {
+        repos[e.cwd, default: 0] += 1
+        if let path = transcriptPath(for: e) { files.insert(path) }
+    }
+    return Liveness(files: files, repos: repos)
+}
+
+/// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus every live session's transcript (always),
 /// plus any hook-seeded transcript paths (a brand-new session emits SessionStart before its file ages in).
-func candidateFiles(live: [String: Int], extra: Set<String> = []) -> Set<String> {
+func candidateFiles(active: Set<String>, extra: Set<String> = []) -> Set<String> {
     let fm = FileManager.default
     let now = Date()
     var files = Set<String>()
@@ -240,7 +265,7 @@ func candidateFiles(live: [String: Int], extra: Set<String> = []) -> Set<String>
             }
         }
     }
-    return files.union(liveSessionFiles(live: live)).union(extra.filter { p in
+    return files.union(active).union(extra.filter { p in
         (mtime(p).map { now.timeIntervalSince($0) < RECENT_WINDOW }) ?? false
     })
 }
@@ -297,12 +322,13 @@ func parseSession(_ path: String, mtime m: Date, size: Int, cache: CollectorCach
 
 func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
                    hooks: [String: HookStatus] = [:], hookFiles: Set<String> = []) -> Snapshot {
-    let live = liveRepos(cache: cache)
-    let activeFiles = liveSessionFiles(live: live)   // the exact session each live agent is driving
+    let liveNow = liveness(cache: cache)
+    let live = liveNow.repos
+    let activeFiles = liveNow.files                  // the exact transcript each live session is driving
     let now = Date()
     var blocks: [Block] = []
     var anyHookDriven = false
-    let candidates = candidateFiles(live: live, extra: hookFiles)
+    let candidates = candidateFiles(active: activeFiles, extra: hookFiles)
 
     for f in candidates {
         guard let m = mtime(f) else { continue }

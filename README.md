@@ -72,9 +72,11 @@ check spends ~1 token of your quota. First run may show a one-time Keychain prom
 
 Data sources, all verified:
 
-- **Live sessions** — `/usr/bin/pgrep -f 'native-binary/claude.*stream-json'` → PIDs;
-  `/usr/sbin/lsof` → each PID's cwd. Liveness is matched to a session by **encoded project-dir name**
-  (robust even if a transcript header lacks `cwd`).
+- **Live sessions** - Claude Code's session registry, `~/.claude/sessions/<pid>.json` (the data behind
+  `claude agents --json`): one entry per running session with its `sessionId` and `cwd`. An entry is
+  live when its pid is running and that process started no later than the session, which rules out a
+  stale file whose pid was reused. Without a registry (older Claude Code) the app falls back to
+  `pgrep` + `lsof` and treats the newest transcript per repo as the live one.
 - **Transcripts** — `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity.
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
   non-conversational lines) + file age.
