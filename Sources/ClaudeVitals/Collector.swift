@@ -228,6 +228,9 @@ func liveSessionFiles(live: [String: Int]) -> Set<String> {
 struct Liveness {
     let files: Set<String>
     let repos: [String: Int]
+    /// True when the registry named this exact session; false when the process scan guessed the
+    /// newest transcript per repo.
+    let confirmed: Bool
 }
 
 /// The session registry is the source of liveness: one entry per running session, keyed by session id,
@@ -240,7 +243,7 @@ func liveness(cache: CollectorCache) -> Liveness {
     let entries = readRegistry().filter { isLiveEntry($0) }
     guard !entries.isEmpty else {
         let repos = liveRepos(cache: cache)
-        return Liveness(files: liveSessionFiles(live: repos), repos: repos)
+        return Liveness(files: liveSessionFiles(live: repos), repos: repos, confirmed: false)
     }
     var files = Set<String>()
     var repos: [String: Int] = [:]
@@ -248,7 +251,7 @@ func liveness(cache: CollectorCache) -> Liveness {
         repos[e.cwd, default: 0] += 1
         if let path = transcriptPath(for: e) { files.insert(path) }
     }
-    return Liveness(files: files, repos: repos)
+    return Liveness(files: files, repos: repos, confirmed: true)
 }
 
 /// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus every live session's transcript (always),
@@ -349,7 +352,9 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
         let repo = cwd.isEmpty ? dirName : URL(fileURLWithPath: cwd).lastPathComponent
 
         let heuristic = deriveState(lastType: ps.lastType, lastStop: ps.lastStop, asksUser: ps.asksUser, age: age, isLive: heuristicIsLive)
-        let resolved = resolveState(heuristic: (heuristic.0, heuristic.1), isLive: heuristicIsLive, hook: hooks[sessionId], now: now)
+        let resolved = resolveState(heuristic: (heuristic.0, heuristic.1), isLive: heuristicIsLive,
+                                    liveConfirmed: liveNow.confirmed && heuristicIsLive,
+                                    hook: hooks[sessionId], transcriptMtime: m, now: now)
         if resolved.usedHook { anyHookDriven = true }
 
         blocks.append(Block(
@@ -395,13 +400,18 @@ actor Collector {
     func snapshot() -> Snapshot { buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles) }
 
     /// Fold one hook event into per-session state, seed its transcript as a candidate, and rebuild.
+    /// Prune AFTER building: a session that still has a card keeps its hook state however long it has
+    /// been silent (an unanswered permission prompt emits nothing while it waits), so only sessions that
+    /// have already dropped off age out. Bounded by the card count plus one window of new arrivals.
     func ingest(_ e: HookEvent) -> Snapshot {
-        hooks[e.session_id] = applyHookEvent(hooks[e.session_id], e, at: Date())
+        if let s = applyHookEvent(hooks[e.session_id], e, at: Date()) { hooks[e.session_id] = s }
         if let tp = e.transcript_path { hookFiles.insert(tp) }
+        let snap = buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles)
         let cutoff = Date().addingTimeInterval(-RECENT_WINDOW)
-        hooks = hooks.filter { $0.value.at > cutoff }        // bound growth
-        hookFiles = hookFiles.filter { (mtime($0).map { $0 > cutoff }) ?? false }   // bound growth
-        return buildSnapshot(parser: parser, cache: cache, hooks: hooks, hookFiles: hookFiles)
+        let onCard = Set(snap.blocks.map(\.sessionId))
+        hooks = hooks.filter { onCard.contains($0.key) || $0.value.at > cutoff }
+        hookFiles = hookFiles.filter { (mtime($0).map { $0 > cutoff }) ?? false }
+        return snap
     }
 }
 
