@@ -100,7 +100,10 @@ bundled Claude Code plugin once:
 
 At user scope it applies to every session in every repo. Its hooks push lifecycle events over a Unix
 domain socket (`~/.claude-vitals/vitals.sock`) to the running app, which uses them as the authoritative,
-low-latency source of session state while the transcript stays the source of tokens/context/cost.
+low-latency source of session state while the transcript stays the source of tokens/context/cost. Hook
+state stays authoritative while the session registry confirms the session is alive, and falls back to
+transcript polling when it can't be confirmed (a fresh hook still wins for one short window regardless)
+or the transcript advances without new hook events.
 Without the plugin the app falls back to transcript polling exactly as before. Disable anytime via
 `/plugin`.
 
@@ -110,7 +113,7 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 
 | File | Responsibility |
 |---|---|
-| `Entry.swift` | `@main`; `--dump` branch vs launching the GUI; sets `.accessory` (no Dock icon). |
+| `Entry.swift` | `@main`; `--dump`/`--selfcheck` branches vs launching the GUI; sets `.accessory` (no Dock icon). |
 | `App.swift` | `MenuBarExtra(.window)` scene + `AppDelegate`. |
 | `Models.swift` | Tolerant Codable transcript subset; `Dot`/`Block`/`Snapshot`/`Effort`. |
 | `SessionRegistry.swift` | Claude Code session registry: tolerant read, pid liveness + pid-reuse check, entry -> transcript. |

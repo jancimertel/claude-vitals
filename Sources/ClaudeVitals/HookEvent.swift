@@ -1,6 +1,8 @@
 import Foundation
 
-/// Hook state wins over the transcript heuristic while its last event is newer than this.
+/// Freshness window: a hook this recent wins outright regardless of confirmed liveness or supersession.
+/// It also doubles as the fallback gate when liveness can't be confirmed by the registry, and bounds how
+/// far the transcript may advance past the last hook event before that hook is treated as superseded.
 let HOOK_FRESH_S: TimeInterval = 15
 
 /// One lifecycle event delivered by the Claude Code plugin over the socket. Field names mirror the
@@ -43,8 +45,10 @@ struct HookStatus: Sendable {
 
 /// Fold one event into the running per-session status. Numbers (tokens/ctx/cost) are NOT tracked here;
 /// they come from the transcript. Subagent events carry no state change - they exist only to trigger an
-/// immediate re-parse (which recomputes the file-based subagent count) at the call site.
-func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookStatus {
+/// immediate re-parse (which recomputes the file-based subagent count) at the call site. Returns nil when
+/// a stateless event (Notification/SubagentStart/SubagentStop/unknown) arrives with no prior status: there
+/// is nothing real to refresh, and minting a fabricated "idle" would stick under confirmed liveness.
+func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookStatus? {
     var s = prev ?? HookStatus(dot: .idle, state: "idle", toolName: nil, alive: true, at: now)
     s.at = now
     switch e.event {
@@ -56,9 +60,10 @@ func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookSt
     case "PermissionRequest": s.dot = .waitingPermission; s.state = "needs permission"; s.toolName = e.tool_name
     case "Stop":              s.dot = .waiting;      s.state = "waiting prompt"; s.toolName = nil
     // Notification is a backstop (PermissionRequest/Stop carry the real transitions); subagent events
-    // only trigger a re-parse. All three just refresh the timestamp (via s.at = now above), no state change.
-    case "Notification", "SubagentStart", "SubagentStop": break
-    default: break
+    // only trigger a re-parse. Neither carries state, so they just refresh `at` (set above) - and with
+    // no prior status there is nothing to refresh: minting an "idle" here would stick, because confirmed
+    // liveness keeps hook state authoritative until a real event replaces it.
+    default: return prev == nil ? nil : s        // Notification, SubagentStart, SubagentStop, unknown
     }
     return s
 }

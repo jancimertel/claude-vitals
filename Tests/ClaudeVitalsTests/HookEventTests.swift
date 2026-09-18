@@ -24,7 +24,7 @@ final class HookEventTests: XCTestCase {
 
     func testPreToolUseGoesRunningToolWithName() {
         let e = HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash")
-        let s = applyHookEvent(nil, e, at: t0)
+        let s = applyHookEvent(nil, e, at: t0)!     // stateful event -> always non-nil
         XCTAssertEqual(s.dot, .runningTool)
         XCTAssertEqual(s.state, "running Bash")
         XCTAssertEqual(s.toolName, "Bash")
@@ -34,39 +34,46 @@ final class HookEventTests: XCTestCase {
 
     func testPermissionRequestGoesWaitingPermission() {
         let e = HookEvent(event: "PermissionRequest", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash")
-        let s = applyHookEvent(nil, e, at: t0)
+        let s = applyHookEvent(nil, e, at: t0)!     // stateful event -> always non-nil
         XCTAssertEqual(s.dot, .waitingPermission)
         XCTAssertEqual(s.state, "needs permission")
     }
 
     func testStopGoesWaitingPrompt() {
         let e = HookEvent(event: "Stop", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil)
-        let s = applyHookEvent(nil, e, at: t0)
+        let s = applyHookEvent(nil, e, at: t0)!     // stateful event -> always non-nil
         XCTAssertEqual(s.dot, .waiting)
         XCTAssertEqual(s.state, "waiting prompt")
     }
 
     func testSessionEndGoesEndedNotAlive() {
         let e = HookEvent(event: "SessionEnd", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil)
-        let s = applyHookEvent(nil, e, at: t0)
+        let s = applyHookEvent(nil, e, at: t0)!     // stateful event -> always non-nil
         XCTAssertEqual(s.dot, .ended)
         XCTAssertFalse(s.alive)
     }
 
+    /// A stateless event with no prior status has nothing to refresh - minting a fabricated "idle" here
+    /// would stick indefinitely under confirmed liveness, so it must return nil instead.
+    func testStatelessEventWithNoPriorStatusReturnsNil() {
+        let e = HookEvent(event: "Notification", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil)
+        XCTAssertNil(applyHookEvent(nil, e, at: t0))
+    }
+
     func testNotificationDoesNotChangeStateWhileRunning() {
-        let running = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)
+        let running = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)!
         let later = t0.addingTimeInterval(2)
-        let s = applyHookEvent(running, HookEvent(event: "Notification", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil), at: later)
+        let s = applyHookEvent(running, HookEvent(event: "Notification", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil), at: later)!
         XCTAssertEqual(s.dot, .runningTool)   // unchanged - no false "finished" transition
         XCTAssertEqual(s.state, "running Bash")
         XCTAssertEqual(s.at, later)           // timestamp still advances (liveness backstop)
     }
 
     func testSubagentEventsDoNotChangeStateButBumpTimestamp() {
-        let base = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)
+        let base = applyHookEvent(nil, HookEvent(event: "PreToolUse", session_id: "s", cwd: nil, transcript_path: nil, tool_name: "Bash"), at: t0)!
         let later = t0.addingTimeInterval(3)
         let e = HookEvent(event: "SubagentStart", session_id: "s", cwd: nil, transcript_path: nil, tool_name: nil)
-        let s = applyHookEvent(base, e, at: later)
+        let s = applyHookEvent(base, e, at: later)!
         XCTAssertEqual(s.dot, .runningTool)      // unchanged
         XCTAssertEqual(s.at, later)              // timestamp advanced (keeps hook state fresh)
     }
