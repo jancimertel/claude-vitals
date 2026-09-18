@@ -75,7 +75,8 @@ Data sources, all verified:
 - **Live sessions** - Claude Code's session registry, `~/.claude/sessions/<pid>.json` (the data behind
   `claude agents --json`): one entry per running session with its `sessionId` and `cwd`. An entry is
   live when its pid is running and that process started no later than the session, which rules out a
-  stale file whose pid was reused. Without a registry (older Claude Code) the app falls back to
+  stale file whose pid was reused. When the registry reports no live session (no directory on older
+  Claude Code, or a directory the running version does not populate) the app falls back to
   `pgrep` + `lsof` and treats the newest transcript per repo as the live one.
 - **Transcripts** — `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity.
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
@@ -112,7 +113,8 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 | `Entry.swift` | `@main`; `--dump` branch vs launching the GUI; sets `.accessory` (no Dock icon). |
 | `App.swift` | `MenuBarExtra(.window)` scene + `AppDelegate`. |
 | `Models.swift` | Tolerant Codable transcript subset; `Dot`/`Block`/`Snapshot`/`Effort`. |
-| `Collector.swift` | pgrep/lsof, candidate files, state/context/sub-agents, `buildSnapshot`, `Collector` actor. |
+| `SessionRegistry.swift` | Claude Code session registry: tolerant read, pid liveness + pid-reuse check, entry -> transcript. |
+| `Collector.swift` | Liveness (registry, pgrep/lsof fallback), candidate files, state/context/sub-agents, `buildSnapshot`, `Collector` actor. |
 | `TranscriptParser.swift` | Incremental effort cache (mtime+offset gated) + pricing. |
 | `Store.swift` | `@MainActor` observable store, adaptive poll loop, running→waiting edge detection. |
 | `Views.swift` | Popover, header, session card, context ring, pulse dot, footer, menu-bar label. |

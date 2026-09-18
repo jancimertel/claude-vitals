@@ -21,11 +21,11 @@ struct RegistryEntry: Decodable, Sendable, Equatable {
     let startedAt: Double?   // ms since epoch; nil disables the pid-reuse check for that entry
 }
 
-/// nil when the registry directory does not exist (older Claude Code), so the caller can fall back to
-/// process scanning. An existing but empty directory is a valid "no sessions" answer, not a fallback.
-func readRegistry(dir: URL = SESSIONS_DIR) -> [RegistryEntry]? {
+/// Empty when the directory does not exist (older Claude Code) or holds no readable entry. The caller
+/// treats both the same way: the registry has nothing to say, so it falls back to process scanning.
+func readRegistry(dir: URL = SESSIONS_DIR) -> [RegistryEntry] {
     guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
-        return nil
+        return []
     }
     let dec = JSONDecoder()
     return files.filter { $0.pathExtension == "json" }.compactMap { f in

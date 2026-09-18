@@ -21,11 +21,11 @@ final class SessionRegistryTests: XCTestCase {
 
     // MARK: readRegistry
 
-    func testMissingDirectoryReturnsNil() {
-        XCTAssertNil(readRegistry(dir: tmp.appendingPathComponent("absent")))
+    func testMissingDirectoryReturnsEmpty() {
+        XCTAssertEqual(readRegistry(dir: tmp.appendingPathComponent("absent")), [])
     }
 
-    func testEmptyDirectoryReturnsEmptyNotNil() {
+    func testEmptyDirectoryReturnsEmpty() {
         XCTAssertEqual(readRegistry(dir: tmp), [])
     }
 
@@ -69,11 +69,14 @@ final class SessionRegistryTests: XCTestCase {
     // MARK: transcriptPath
 
     func testTranscriptPathPrefersTheProjectDirDerivedFromCwd() {
-        let dir = tmp.appendingPathComponent(encodeRepo("/work/repo"))
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        write("s1.jsonl", "", in: dir)
+        let derived = tmp.appendingPathComponent(encodeRepo("/work/repo"))
+        let other = tmp.appendingPathComponent("-aaa-sorts-first")   // also holds s1.jsonl; must not win
+        for dir in [derived, other] {
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            write("s1.jsonl", "", in: dir)
+        }
         XCTAssertEqual(transcriptPath(for: entry(startedAt: nil), projects: tmp),
-                       dir.appendingPathComponent("s1.jsonl").path)
+                       derived.appendingPathComponent("s1.jsonl").path)
     }
 
     func testTranscriptPathFallsBackToSessionIdSearch() {
