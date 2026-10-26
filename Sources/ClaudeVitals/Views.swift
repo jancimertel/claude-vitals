@@ -101,6 +101,11 @@ struct UsageStripView: View {
 struct PopoverView: View {
     @ObservedObject var store: Store
     @State private var visible = false
+    @State private var gridHeight: CGFloat = 0
+    @State private var contentSize: CGSize = .zero
+
+    /// Room left for the grid under the header, usage strip and footer.
+    private var maxGridHeight: CGFloat { (NSScreen.main?.visibleFrame.height ?? 800) - 200 }
 
     private func columns(_ n: Int) -> Int { n <= 1 ? 1 : n <= 4 ? 2 : 3 }
 
@@ -126,18 +131,49 @@ struct PopoverView: View {
                         ForEach(blocks) { SessionCardView(block: $0, compact: compact) }
                     }
                     .padding(12)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { gridHeight = $0 }
                 }
-                .frame(maxHeight: 560)
+                // Show every card; scroll only once the grid would run off the screen.
+                .frame(height: min(gridHeight, maxGridHeight))
             }
 
             Divider().overlay(Theme.hairline)
-            FooterView(store: store)
+            FooterView(store: store, narrow: cols == 1)
         }
         .frame(width: CGFloat(cols) * 264 + CGFloat(cols - 1) * 10 + 24)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bgWindow.opacity(0.92))
         .background(.ultraThinMaterial)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
+        .background(WindowFitter(size: contentSize))
         .background(WindowVisibilityReader(visible: $visible))
         .environment(\.popoverVisible, visible)
+    }
+}
+
+// MARK: - Popover window sizing
+
+/// MenuBarExtra sizes its window once and doesn't follow later content changes: it keeps the
+/// launch-time height (clipping the cards) or a 2-column width after dropping to 1 column.
+/// Resize it to the content ourselves, keeping the top and right edges under the menu-bar item.
+struct WindowFitter: NSViewRepresentable {
+    let size: CGSize
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let size = size
+        DispatchQueue.main.async {
+            guard size.width > 0, size.height > 0, let window = nsView.window,
+                  let screen = window.screen ?? NSScreen.main else { return }
+            let bounds = screen.visibleFrame
+            var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+            let top = window.frame.maxY
+            frame.size.height = min(frame.height, top - bounds.minY)
+            frame.origin.x = max(bounds.minX, min(window.frame.maxX, bounds.maxX) - frame.width)
+            frame.origin.y = top - frame.height
+            if frame != window.frame { window.setFrame(frame, display: true) }
+        }
     }
 }
 
@@ -206,6 +242,7 @@ struct HeaderView: View {
                          active: store.runningCount > 0, size: 8)
                 Text("\(store.runningCount) running")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
+                    .fixedSize()
             }
             if s.subsRunning > 0 {
                 HStack(spacing: 5) {
@@ -393,22 +430,28 @@ struct EmptyStateView: View {
 struct FooterView: View {
     @ObservedObject var store: Store
     @State private var launch = LaunchAtLogin.isEnabled
+    var narrow = false                                 // single-column popover: drop the Refresh title to fit
     @State private var sound = Chime.enabled
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: narrow ? 10 : 12) {
             Button { store.refreshNow() } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                if narrow {
+                    Image(systemName: "arrow.clockwise")
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
             }
             .buttonStyle(.plain)
+            .help("Refresh")
 
             Toggle("Sound", isOn: $sound)
-                .toggleStyle(.switch).controlSize(.mini)
+                .toggleStyle(.switch).controlSize(.mini).fixedSize()
                 .onChange(of: sound) { _, newValue in Chime.enabled = newValue }
 
             if LaunchAtLogin.available {
                 Toggle("Launch at login", isOn: $launch)
-                    .toggleStyle(.switch).controlSize(.mini)
+                    .toggleStyle(.switch).controlSize(.mini).fixedSize()
                     .onChange(of: launch) { _, newValue in LaunchAtLogin.set(newValue) }
             }
 
