@@ -100,6 +100,7 @@ struct UsageStripView: View {
 
 struct PopoverView: View {
     @ObservedObject var store: Store
+    @State private var visible = false
 
     private func columns(_ n: Int) -> Int { n <= 1 ? 1 : n <= 4 ? 2 : 3 }
 
@@ -135,6 +136,60 @@ struct PopoverView: View {
         .frame(width: CGFloat(cols) * 264 + CGFloat(cols - 1) * 10 + 24)
         .background(Theme.bgWindow.opacity(0.92))
         .background(.ultraThinMaterial)
+        .background(WindowVisibilityReader(visible: $visible))
+        .environment(\.popoverVisible, visible)
+    }
+}
+
+// MARK: - Popover visibility
+
+private struct PopoverVisibleKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// False while the MenuBarExtra window is closed. Its view tree stays alive when closed, so
+    /// anything that animates continuously must check this or it redraws the hidden window every frame.
+    var popoverVisible: Bool {
+        get { self[PopoverVisibleKey.self] }
+        set { self[PopoverVisibleKey.self] = newValue }
+    }
+}
+
+/// Tracks whether the hosting window is on screen. onAppear/onDisappear are unreliable inside
+/// MenuBarExtra windows, so this watches the NSWindow's occlusion state directly.
+struct WindowVisibilityReader: NSViewRepresentable {
+    @Binding var visible: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ObservingView()
+        view.onChange = { v in DispatchQueue.main.async { if visible != v { visible = v } } }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class ObservingView: NSView {
+        var onChange: ((Bool) -> Void)?
+        nonisolated(unsafe) private var token: NSObjectProtocol?   // only touched on main + in deinit
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let token { NotificationCenter.default.removeObserver(token) }
+            token = nil
+            guard let window else { onChange?(false); return }
+            token = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.report() } }   // queue: .main
+            report()
+        }
+
+        private func report() {
+            guard let window else { return }
+            onChange?(window.isVisible && window.occlusionState.contains(.visible))
+        }
+
+        deinit { if let token { NotificationCenter.default.removeObserver(token) } }
     }
 }
 
@@ -306,14 +361,18 @@ struct PulseDot: View {
     let color: Color
     let active: Bool
     var size: CGFloat = 8
+    @Environment(\.popoverVisible) private var visible
     @State private var on = false
+    // Pulse only while on screen: a repeatForever animation in the hidden popover costs ~20% CPU.
+    private var pulsing: Bool { active && visible }
     var body: some View {
         Circle().fill(color).frame(width: size, height: size)
-            .opacity(active ? (on ? 0.35 : 1) : 1)
-            .animation(active ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
+            .opacity(pulsing ? (on ? 0.35 : 1) : 1)
+            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
                        value: on)
-            .onAppear { on = active }
-            .onChange(of: active) { _, nowActive in on = nowActive }   // restart pulse on idle->running cycles
+            .onAppear { on = pulsing }
+            .id(pulsing)   // new identity drops the in-flight repeatForever; swapping the animation alone doesn't stop it
+            .onChange(of: pulsing) { _, nowPulsing in on = nowPulsing }   // restart pulse on each open / idle->running
     }
 }
 
@@ -334,6 +393,7 @@ struct EmptyStateView: View {
 struct FooterView: View {
     @ObservedObject var store: Store
     @State private var launch = LaunchAtLogin.isEnabled
+    @State private var sound = Chime.enabled
 
     var body: some View {
         HStack(spacing: 12) {
@@ -341,6 +401,10 @@ struct FooterView: View {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
             .buttonStyle(.plain)
+
+            Toggle("Sound", isOn: $sound)
+                .toggleStyle(.switch).controlSize(.mini)
+                .onChange(of: sound) { _, newValue in Chime.enabled = newValue }
 
             if LaunchAtLogin.available {
                 Toggle("Launch at login", isOn: $launch)

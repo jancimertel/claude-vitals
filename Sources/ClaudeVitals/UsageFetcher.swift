@@ -11,6 +11,10 @@ struct RateUsage: Sendable {
     var capturedAt: Date
 
     var maxPct: Double? { [fiveH, sevenD].compactMap { $0 }.max() }
+
+    /// What the menu-bar ring shows: always the 5h session window — the limit that actually gates
+    /// day-to-day work. Falls back to the weekly value only when 5h is missing from the headers.
+    var menuPct: Double? { fiveH ?? sevenD }
 }
 
 /// Reads usage via the Claude Code OAuth token from the Keychain + a minimal /v1/messages call.

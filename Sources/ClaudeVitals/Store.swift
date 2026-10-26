@@ -35,6 +35,7 @@ final class Store: ObservableObject {
     private var loop: Task<Void, Never>?
     private var usageLoop: Task<Void, Never>?
     private var lastUsageFetch: Date = .distantPast
+    private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (-1 == "no usage")
     private var socket: EventSocket?
 
     init() { start(); startUsage(); startSocket() }
@@ -62,7 +63,8 @@ final class Store: ObservableObject {
                 let s = await self.collector.snapshot()
                 self.apply(s)
                 let busy = s.running > 0 || s.subsRunning > 0
-                let interval: Double = s.hookDriven ? 5 : (busy ? 1.5 : 5)
+                // Hook events push updates via the socket, so the poll is only a backstop then.
+                let interval: Double = s.hookDriven ? 8 : (busy ? 2 : 8)
                 try? await Task.sleep(for: .seconds(interval))
             }
         }
@@ -83,7 +85,7 @@ final class Store: ObservableObject {
                     self.lastUsageFetch = Date()
                     if let u = await RateLimitFetcher.fetch() {
                         self.usage = u
-                        self.labelImage = self.renderLabelImage()
+                        self.updateLabelImage()
                     }
                 }
                 try? await Task.sleep(for: .seconds(30))
@@ -105,13 +107,23 @@ final class Store: ObservableObject {
             if AppEnv.isBundled { Notifier.shared.notify(alert) }
         }
         snap = s
-        labelImage = renderLabelImage()
+        updateLabelImage()
+    }
+
+    /// Re-rasterize the menu-bar ring only when the displayed integer % (or presence of usage data)
+    /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
+    /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
+    private func updateLabelImage() {
+        let bucket = freshUsage?.menuPct.map { Int($0.rounded()) } ?? -1
+        guard bucket != renderedPct else { return }
+        renderedPct = bucket
+        labelImage = bucket < 0 ? nil : renderLabelImage()
     }
 
     /// Render the menu-bar usage loader to a (non-template, colored) image. Nil when there's no
     /// fresh rate-limit data, so MenuLabel falls back to the running-status dot.
     private func renderLabelImage() -> NSImage? {
-        guard let pct = freshUsage?.maxPct else { return nil }   // max(5h session, 7d weekly)
+        guard let pct = freshUsage?.menuPct else { return nil }   // 5h session window
         let renderer = ImageRenderer(content: LoaderRing(pct: pct, size: 18))
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
         guard let img = renderer.nsImage else { return nil }
