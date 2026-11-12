@@ -55,7 +55,6 @@ struct LoaderRing: View {
         ZStack {
             // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
             // anything past the frame, which cut off the ring's outer edge in the menu bar.
-            Circle().inset(by: lineWidth / 2).stroke(Color.gray.opacity(0.4), lineWidth: lineWidth)
             Circle().inset(by: lineWidth / 2).trim(from: 0, to: clamped / 100)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
