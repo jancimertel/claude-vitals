@@ -148,8 +148,8 @@ final class Store: ObservableObject {
     private func renderLabelImage(_ pct: Double?) -> NSImage? {
         let glyph: AnyView
         if let pct {
-            // Aurora's ring fills its 22pt circle: at 19.5pt the stroke's outer edge meets the rim.
-            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: theme == .aurora ? 19.5 : 18))
+            // Aurora's ring fills its 22pt circle, so its outer edge meets the rim.
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: theme == .aurora ? 22 : 18))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {

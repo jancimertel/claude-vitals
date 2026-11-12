@@ -51,10 +51,13 @@ struct LoaderRing: View {
     private var clamped: Double { min(max(pct, 0), 100) }
     var body: some View {
         let color = Theme.usage(pct, theme)
+        let lineWidth = size * 0.13
         ZStack {
-            Circle().stroke(Color.gray.opacity(0.4), lineWidth: size * 0.13)
-            Circle().trim(from: 0, to: clamped / 100)
-                .stroke(color, style: StrokeStyle(lineWidth: size * 0.13, lineCap: .round))
+            // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
+            // anything past the frame, which cut off the ring's outer edge in the menu bar.
+            Circle().inset(by: lineWidth / 2).stroke(Color.gray.opacity(0.4), lineWidth: lineWidth)
+            Circle().inset(by: lineWidth / 2).trim(from: 0, to: clamped / 100)
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(Int(clamped.rounded()))")            // the % inside the ring
                 .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
