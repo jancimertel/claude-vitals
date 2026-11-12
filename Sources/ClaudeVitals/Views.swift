@@ -291,10 +291,14 @@ struct StateBadge: View {
         HStack(spacing: 4) {
             PulseDot(color: Theme.state(dot), active: dot.isRunning, size: 6)
             Text(label).font(.system(size: 10, weight: .medium)).foregroundStyle(Theme.state(dot))
+                .lineLimit(1).truncationMode(.tail)
         }
         .padding(.horizontal, 7).padding(.vertical, 3)
+        // Cap the width so a long state (e.g. a tool name) truncates instead of crowding out the repo name.
+        .frame(maxWidth: 130)
         .background(Theme.state(dot).opacity(0.14), in: Capsule())
-        .fixedSize()
+        .fixedSize(horizontal: false, vertical: true)
+        .help(label)
     }
 }
 
