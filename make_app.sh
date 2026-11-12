@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Build release + wrap into an ad-hoc-signed ClaudeVitals.app (LSUIElement, bundle id)
 # so UNUserNotifications + SMAppService work. Personal use: ad-hoc signing is enough.
+# Usage: ./make_app.sh             build ./ClaudeVitals.app
+#        ./make_app.sh --install   build, move it to /Applications, relaunch
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -54,5 +56,18 @@ PLIST
 echo "==> ad-hoc codesign"
 codesign --force --deep --sign - "$APP"
 
+# --install: replace /Applications/ClaudeVitals.app with this build and relaunch it. The build is
+# moved, not copied, so Spotlight and Launchpad list one Claude Vitals instead of two.
+if [[ "${1:-}" == "--install" ]]; then
+    DEST="/Applications/$APP"
+    echo "==> installing to $DEST"
+    pkill -x "$BIN" || true
+    rm -rf "$DEST"
+    mv "$APP" "$DEST"
+    open "$DEST"
+    echo "==> done: $DEST is running"
+    exit 0
+fi
+
 echo "==> done: $(pwd)/$APP"
-echo "Run: open $APP   (or move it to /Applications)"
+echo "Run: open $APP   (or ./make_app.sh --install to put it in /Applications)"

@@ -19,7 +19,7 @@ swift run ClaudeVitals --dump   # headless: print the snapshot and exit (data-la
 ```bash
 ./make_app.sh            # builds release, wraps into an ad-hoc-signed ClaudeVitals.app
 open ClaudeVitals.app
-# or move it to /Applications
+# or: ./make_app.sh --install   # moves it to /Applications and relaunches; rerun after each change
 ```
 
 Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on Swift 6.2 / macOS 26.

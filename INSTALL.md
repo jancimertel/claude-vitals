@@ -19,6 +19,9 @@ cd claude-vitals
 open ClaudeVitals.app  # menu-bar glyph appears
 ```
 
+To keep it in `/Applications` (Spotlight, Launchpad), use `./make_app.sh --install` instead. It
+moves the build there and relaunches it; rerun it after each change.
+
 Dev run without bundling: `swift run ClaudeVitals` (or `swift run ClaudeVitals --dump` for a headless snapshot).
 
 ## 2. Install the plugin (optional, for fast triggers)
