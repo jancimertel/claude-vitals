@@ -11,7 +11,7 @@ struct MenuLabel: View {
             } else {
                 Image(systemName: store.runningCount > 0 ? "circle.fill" : "circle")
                     .symbolRenderingMode(.multicolor)
-                    .foregroundStyle(store.runningCount > 0 ? .green : .secondary)
+                    .foregroundStyle(store.runningCount > 0 ? store.gaugeTheme.runningDot : .secondary)
             }
             // Just the ring/circle in the menu bar — the running count lives in the popover header.
         }
@@ -19,14 +19,15 @@ struct MenuLabel: View {
 }
 
 /// Circular usage gauge used both in the menu bar (rendered to an image) and the popover.
-/// green → amber → orange → red, with a filled center when ≥100% (limit exceeded).
+/// Colored per `theme` (see Theme.usage).
 struct LoaderRing: View {
     let pct: Double
+    let theme: GaugeTheme
     var size: CGFloat = 18
 
     private var clamped: Double { min(max(pct, 0), 100) }
     var body: some View {
-        let color = Theme.usage(pct)
+        let color = Theme.usage(pct, theme)
         ZStack {
             Circle().stroke(Color.gray.opacity(0.4), lineWidth: size * 0.13)
             Circle().trim(from: 0, to: clamped / 100)
@@ -45,6 +46,7 @@ struct LoaderRing: View {
 /// Strip under the header showing the two subscription windows as bars (only when data is fresh).
 struct UsageStripView: View {
     let usage: RateUsage
+    let theme: GaugeTheme
     var narrow = false                                 // single-column popover: too tight for one row
     var body: some View {
         // TimelineView re-evaluates on open (and every 15s while open) so the "updated" age and reset
@@ -79,7 +81,7 @@ struct UsageStripView: View {
 
     @ViewBuilder private func bar(_ label: String, _ pct: Double?, _ reset: Date?, _ now: Date) -> some View {
         if let pct {
-            let c = Theme.usage(pct)
+            let c = Theme.usage(pct, theme)
             HStack(spacing: 6) {
                 Text(label).font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
                 ZStack(alignment: .leading) {
@@ -118,7 +120,7 @@ struct PopoverView: View {
             HeaderView(store: store)
             if let u = store.freshUsage {
                 Divider().overlay(Theme.hairline)
-                UsageStripView(usage: u, narrow: cols == 1)
+                UsageStripView(usage: u, theme: store.gaugeTheme, narrow: cols == 1)
             }
             Divider().overlay(Theme.hairline)
 
@@ -444,6 +446,12 @@ struct FooterView: View {
             }
             .buttonStyle(.plain)
             .help("Refresh")
+
+            Picker("Theme", selection: $store.gaugeTheme) {
+                ForEach(GaugeTheme.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().controlSize(.mini).fixedSize()
+            .help("Usage gauge colors")
 
             Toggle("Sound", isOn: $sound)
                 .toggleStyle(.switch).controlSize(.mini).fixedSize()

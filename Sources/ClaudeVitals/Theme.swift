@@ -10,6 +10,21 @@ extension Color {
     }
 }
 
+/// Color scheme for the usage gauge (menu-bar ring and popover bars), chosen in the footer.
+enum GaugeTheme: String, CaseIterable, Identifiable {
+    case classic, aurora
+    var id: Self { self }
+    var title: String { self == .classic ? "Classic" : "Aurora" }
+
+    /// Menu-bar dot shown while sessions run but there's no usage data yet.
+    var runningDot: Color { self == .classic ? .green : Color(hex: 0x2DD4BF) }
+
+    static var saved: GaugeTheme {
+        get { UserDefaults.standard.string(forKey: "gaugeTheme").flatMap(GaugeTheme.init) ?? .classic }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "gaugeTheme") }
+    }
+}
+
 enum Theme {
     static let bgWindow = Color(hex: 0x0E1014)
     static let scrim = Color(hex: 0x16191F)
@@ -35,14 +50,25 @@ enum Theme {
         return Color(hex: 0xF87171)
     }
 
-    /// Subscription-usage gauge color: green near 0 → red near 100 (discrete breakpoints).
-    static func usage(_ pct: Double) -> Color {
-        switch pct {
-        case ..<25: return Color(hex: 0x34D399)   // green
-        case ..<50: return Color(hex: 0x84CC16)   // lime
-        case ..<70: return Color(hex: 0xFACC15)   // yellow
-        case ..<88: return Color(hex: 0xF97316)   // orange
-        default:    return Color(hex: 0xEF4444)   // red
+    /// Subscription-usage gauge color for the chosen theme (discrete breakpoints).
+    static func usage(_ pct: Double, _ theme: GaugeTheme) -> Color {
+        switch theme {
+        case .classic:                                // green near 0 → red near 100
+            switch pct {
+            case ..<25: return Color(hex: 0x34D399)   // green
+            case ..<50: return Color(hex: 0x84CC16)   // lime
+            case ..<70: return Color(hex: 0xFACC15)   // yellow
+            case ..<88: return Color(hex: 0xF97316)   // orange
+            default:    return Color(hex: 0xEF4444)   // red
+            }
+        case .aurora:                                 // the app icon's ring: teal → violet
+            switch pct {
+            case ..<25: return Color(hex: 0x2DD4BF)   // teal
+            case ..<50: return Color(hex: 0x38BDF8)   // sky
+            case ..<70: return Color(hex: 0x818CF8)   // indigo
+            case ..<88: return Color(hex: 0xC084FC)   // violet
+            default:    return Color(hex: 0xF472B6)   // pink: not in the icon, kept so near-limit still stands out
+            }
         }
     }
 

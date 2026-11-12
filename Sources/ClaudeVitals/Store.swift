@@ -29,6 +29,13 @@ final class Store: ObservableObject {
     @Published var snap: Snapshot = .empty
     @Published var usage: RateUsage?      // real subscription usage (live, from rate-limit headers)
     @Published var labelImage: NSImage?   // colored usage-loader glyph (nil -> fall back to dot)
+    @Published var gaugeTheme = GaugeTheme.saved {
+        didSet {
+            GaugeTheme.saved = gaugeTheme
+            renderedPct = -2                  // same % bucket, new colors: force a re-render
+            updateLabelImage()
+        }
+    }
 
     private let collector = Collector()
     private var tracker = TransitionTracker()
@@ -136,7 +143,7 @@ final class Store: ObservableObject {
     /// fresh rate-limit data, so MenuLabel falls back to the running-status dot.
     private func renderLabelImage() -> NSImage? {
         guard let pct = freshUsage?.menuPct else { return nil }   // 5h session window
-        let renderer = ImageRenderer(content: LoaderRing(pct: pct, size: 18))
+        let renderer = ImageRenderer(content: LoaderRing(pct: pct, theme: gaugeTheme, size: 18))
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
         guard let img = renderer.nsImage else { return nil }
         img.isTemplate = false   // keep the green/amber/red color in the menu bar
