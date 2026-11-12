@@ -18,6 +18,29 @@ struct MenuLabel: View {
     }
 }
 
+/// Aurora's menu-bar tile: the glyph on the icon's navy, so it reads as the app on any menu bar.
+struct MenuTile<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        content
+            .frame(width: 22, height: 22)
+            // The icon's lighter navy: Theme.bgWindow is too close to a dark menu bar to show.
+            .background(Color(hex: 0x252C3D), in: Circle())
+    }
+}
+
+/// Menu-bar dot for Aurora when there's no usage data: filled while sessions run, hollow when idle.
+struct StatusDot: View {
+    let running: Bool
+    var body: some View {
+        if running {
+            Circle().fill(Theme.runningModel).frame(width: 9, height: 9)
+        } else {
+            Circle().stroke(Theme.textSecondary, lineWidth: 1.5).frame(width: 9, height: 9)
+        }
+    }
+}
+
 /// Circular usage gauge used both in the menu bar (rendered to an image) and the popover.
 /// Colored per `theme` (see Theme.usage).
 struct LoaderRing: View {

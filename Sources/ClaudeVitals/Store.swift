@@ -44,7 +44,7 @@ final class Store: ObservableObject {
     private var usageLoop: Task<Void, Never>?
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
-    private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (-1 == "no usage")
+    private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
     init() { start(); startUsage(); startSocket() }
@@ -134,17 +134,28 @@ final class Store: ObservableObject {
     /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
     /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
     private func updateLabelImage() {
-        let bucket = freshUsage?.menuPct.map { Int($0.rounded()) } ?? -1
+        let pct = freshUsage?.menuPct
+        // Without usage data: -1 idle, -3 running. Aurora draws that dot itself, on its tile.
+        let bucket = pct.map { Int($0.rounded()) } ?? (runningCount > 0 ? -3 : -1)
         guard bucket != renderedPct else { return }
         renderedPct = bucket
-        labelImage = bucket < 0 ? nil : renderLabelImage()
+        labelImage = renderLabelImage(pct)
     }
 
-    /// Render the menu-bar usage loader to a (non-template, colored) image. Nil when there's no
-    /// fresh rate-limit data, so MenuLabel falls back to the running-status dot.
-    private func renderLabelImage() -> NSImage? {
-        guard let pct = freshUsage?.menuPct else { return nil }   // 5h session window
-        let renderer = ImageRenderer(content: LoaderRing(pct: pct, theme: theme, size: 18))
+    /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (5h window),
+    /// or with no usage data, Aurora's status dot. Nil means MenuLabel falls back to Classic's
+    /// SF Symbol dot. Aurora puts either glyph on a navy tile, like the app icon.
+    private func renderLabelImage(_ pct: Double?) -> NSImage? {
+        let glyph: AnyView
+        if let pct {
+            // Aurora's ring fills its 22pt circle: at 19.5pt the stroke's outer edge meets the rim.
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: theme == .aurora ? 19.5 : 18))
+        } else if theme == .aurora {
+            glyph = AnyView(StatusDot(running: runningCount > 0))
+        } else {
+            return nil
+        }
+        let renderer = ImageRenderer(content: theme == .aurora ? AnyView(MenuTile { glyph }) : glyph)
         renderer.scale = NSScreen.main?.backingScaleFactor ?? 2
         guard let img = renderer.nsImage else { return nil }
         img.isTemplate = false   // keep the green/amber/red color in the menu bar
