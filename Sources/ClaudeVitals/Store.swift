@@ -153,7 +153,7 @@ final class Store: ObservableObject {
     /// sees 100%, 0 at the reset. Nil when not at the limit or the reset time is unknown. The start is
     /// saved per reset time, so relaunching the app mid-wait doesn't refill the ring.
     private func limitDrain(now: Date = Date()) -> Double? {
-        guard let u = usage, let pct = u.menuPct, pct >= 100, let reset = u.menuReset else { return nil }
+        guard let u = freshUsage, let pct = u.menuPct, pct >= 100, let reset = u.menuReset else { return nil }
         let d = UserDefaults.standard
         if d.double(forKey: "limitReset") != reset.timeIntervalSince1970 {
             d.set(reset.timeIntervalSince1970, forKey: "limitReset")
@@ -212,7 +212,8 @@ final class Store: ObservableObject {
 
     /// Show the last fetched usage regardless of age (the strip displays how old it is). Fetching is
     /// gated on activity, so the value may be minutes old — that's surfaced as "updated Xm ago".
-    var freshUsage: RateUsage? { usage }
+    /// Windows past their reset show 0%. The poll loop re-renders the ring within 2–8s of a reset.
+    var freshUsage: RateUsage? { usage?.current() }
 
     /// Text beside the glyph: just the running count (the usage % now lives inside the ring).
     var menuText: String {

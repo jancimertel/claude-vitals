@@ -18,6 +18,16 @@ struct RateUsage: Sendable {
 
     /// When the window behind `menuPct` resets.
     var menuReset: Date? { fiveH != nil ? fiveHReset : sevenDReset }
+
+    /// A window whose reset time has passed is empty: 0% until the next message starts a new one.
+    /// This lets the display drop at the reset without an API call, which would itself use quota and
+    /// start a new 5h window while the user may be away.
+    func current(now: Date = Date()) -> RateUsage {
+        var u = self
+        if fiveH != nil, let r = fiveHReset, r <= now { u.fiveH = 0; u.fiveHReset = nil }
+        if sevenD != nil, let r = sevenDReset, r <= now { u.sevenD = 0; u.sevenDReset = nil }
+        return u
+    }
 }
 
 /// Tracks which Claude account is logged in, via `oauthAccount.accountUuid` in ~/.claude.json, which

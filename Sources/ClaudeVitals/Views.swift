@@ -94,6 +94,7 @@ struct UsageStripView: View {
         // TimelineView re-evaluates on open (and every 15s while open) so the "updated" age and reset
         // countdowns are current each time the popover appears — no API call, just the clock.
         TimelineView(.periodic(from: .now, by: 15)) { ctx in
+            let usage = usage.current(now: ctx.date)
             if narrow {
                 // Stack the windows so each bar gets the full width instead of being crammed on one line.
                 VStack(alignment: .leading, spacing: 6) {
