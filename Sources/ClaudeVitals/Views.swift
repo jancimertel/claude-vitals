@@ -47,22 +47,39 @@ struct LoaderRing: View {
     let pct: Double
     let theme: AppTheme
     var size: CGFloat = 18
+    /// At the limit: the share of the wait until the reset still left (1 → 0). The ring shows this
+    /// instead of the usage, emptying as the reset approaches.
+    var drain: Double? = nil
+    /// At the limit: how much of the heartbeat trace is drawn, left to right (the once-a-minute sweep).
+    var sweep: Double = 1
 
     private var clamped: Double { min(max(pct, 0), 100) }
+    private var fill: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
     var body: some View {
         let color = Theme.usage(pct, theme)
         let lineWidth = size * 0.13
         ZStack {
             // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
             // anything past the frame, which cut off the ring's outer edge in the menu bar.
-            Circle().inset(by: lineWidth / 2).trim(from: 0, to: clamped / 100)
+            Circle().inset(by: lineWidth / 2).trim(from: 0, to: fill)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int(clamped.rounded()))")            // the % inside the ring
-                .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
-                .foregroundStyle(color)
-                .frame(width: size * 0.92)
+            if clamped >= 100 {
+                // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
+                // show a heartbeat trace instead.
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: size * 0.42, weight: .bold))
+                    .foregroundStyle(color)
+                    .mask {
+                        GeometryReader { g in Rectangle().frame(width: g.size.width * sweep) }
+                    }
+            } else {
+                Text("\(Int(clamped.rounded()))")        // the % inside the ring
+                    .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
+                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                    .foregroundStyle(color)
+                    .frame(width: size * 0.92)
+            }
         }
         .frame(width: size, height: size)
     }

@@ -15,6 +15,9 @@ struct RateUsage: Sendable {
     /// What the menu-bar ring shows: always the 5h session window — the limit that actually gates
     /// day-to-day work. Falls back to the weekly value only when 5h is missing from the headers.
     var menuPct: Double? { fiveH ?? sevenD }
+
+    /// When the window behind `menuPct` resets.
+    var menuReset: Date? { fiveH != nil ? fiveHReset : sevenDReset }
 }
 
 /// Tracks which Claude account is logged in, via `oauthAccount.accountUuid` in ~/.claude.json, which
