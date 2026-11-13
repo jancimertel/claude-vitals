@@ -41,7 +41,6 @@ Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on 
   - repo name, git branch, model.
   - **Effort row** — ↑input ↓output tokens, cache, $cost, turns, tool-calls.
   - **Sub-agent chips** — a dot per running sub-agent + total.
-  - **Click a card** → opens that repo in VS Code.
 - **Footer** — Refresh, Launch-at-login toggle (bundled only), Quit.
 
 **Alerts** — when a session transitions running → waiting, a one-shot chime (always) + notification
@@ -121,7 +120,7 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 | `TranscriptParser.swift` | Incremental effort cache (mtime+offset gated) + pricing. |
 | `Store.swift` | `@MainActor` observable store, adaptive poll loop, running→waiting edge detection. |
 | `Views.swift` | Popover, header, session card, context ring, pulse dot, footer, menu-bar label. |
-| `Integrations.swift` | Notifications, chime, VS Code launcher, launch-at-login (all bundle-guarded). |
+| `Integrations.swift` | Notifications, chime, launch-at-login (all bundle-guarded). |
 | `Theme.swift` | Dark color tokens. `AppEnv.swift` | bundle detection gating bundle-only APIs. |
 | `make_app.sh` | Wrap release binary into a signed `.app` (Info.plist, `LSUIElement`). |
 

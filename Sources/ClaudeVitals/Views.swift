@@ -129,12 +129,22 @@ struct UsageStripView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 8)
         .background(Theme.scrim)
-        .help("Subscription usage from Anthropic rate-limit headers; refreshed \u{2264}5 min while agents are active")
     }
 
     private func updated(_ now: Date) -> some View {
         Text("updated \(ageStr(Int(max(0, now.timeIntervalSince(usage.capturedAt)))))")
             .font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
+            .help("Subscription usage, last fetched at \(usage.capturedAt.formatted(date: .omitted, time: .shortened)). "
+                  + "Refreshed at most every 5 min while agents are active.")
+    }
+
+    private func barHelp(_ label: String, _ pct: Double, _ reset: Date?, _ now: Date) -> String {
+        let window = label == "5h" ? "5-hour session limit" : "Weekly limit"
+        var s = "\(window): \(Int(pct))% used"
+        if let reset, let r = resetIn(reset, now: now) {
+            s += ", resets in \(r) (\(reset.formatted(date: .abbreviated, time: .shortened)))"
+        }
+        return s
     }
 
     @ViewBuilder private func bar(_ label: String, _ pct: Double?, _ reset: Date?, _ now: Date) -> some View {
@@ -152,6 +162,7 @@ struct UsageStripView: View {
                     Text("· \(r)").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
                 }
             }
+            .help(barHelp(label, pct, reset, now))
         }
     }
 }
@@ -305,16 +316,21 @@ struct HeaderView: View {
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
                     .fixedSize()
             }
+            .help("Sessions where Claude is working right now")
             if s.subsRunning > 0 {
                 HStack(spacing: 5) {
                     Image(systemName: "diamond.fill").font(.system(size: 8)).foregroundStyle(Theme.runningTool)
                     Text("\(s.subsRunning) sub-agents")
                         .font(.system(size: 11)).foregroundStyle(Theme.textSecondary)
                 }
+                .help("Sub-agents running across all sessions")
             }
             Spacer()
             stat(human(s.totalIn + s.totalOut) + " tok")
+                .help("Tokens in the sessions shown: \(s.totalIn.formatted()) in + \(s.totalOut.formatted()) out, "
+                      + "plus \((s.totalCw + s.totalCr).formatted()) cache")
             stat(String(format: "$%.2f", s.totalCost))
+                .help("What the sessions shown would cost at API list prices (not billed on a subscription)")
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -340,7 +356,7 @@ struct SessionCardView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(alignment: .top, spacing: 10) {
-                ContextRing(pct: block.ctxPct, tokens: block.ctx)
+                ContextRing(pct: block.ctxPct, tokens: block.ctx, limit: block.ctxLimit)
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
                         Text(block.repo).font(.system(size: 13, weight: .semibold))
@@ -375,22 +391,25 @@ struct SessionCardView: View {
         .background(hover ? Theme.cardHover : Theme.card, in: RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(Theme.hairline, lineWidth: 1))
         .shadow(color: .black.opacity(0.35), radius: 8, y: 2)
-        .contentShape(Rectangle())
         .onHover { hover = $0 }
-        .onTapGesture { EditorLauncher.open(cwd: block.cwd) }
-        .help("Open \(block.cwd) in VS Code")
     }
 
     private var effortRow: some View {
         HStack(spacing: 8) {
             metric("arrow.up", human(block.inTok))
+                .help("Input tokens: \(block.inTok.formatted())")
             metric("arrow.down", human(block.outTok))
+                .help("Output tokens: \(block.outTok.formatted())")
             metric("arrow.triangle.2.circlepath", human(block.cw + block.cr))
+                .help("Cache tokens: \(block.cw.formatted()) written, \(block.cr.formatted()) read")
             Spacer(minLength: 0)
             Text(String(format: "$%.2f", block.cost))
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.textPrimary)
+                .help("Cost at API list prices (not billed on a subscription)")
             Text("\(block.turns)t").font(.system(size: 10)).monospacedDigit().foregroundStyle(Theme.textTertiary)
+                .help("Turns: replies where Claude finished and handed back to you")
             Text("\(block.tools)⚙").font(.system(size: 10)).monospacedDigit().foregroundStyle(Theme.textTertiary)
+                .help("Tool calls")
         }
         .lineLimit(1).minimumScaleFactor(0.85)
         .padding(.horizontal, 8).padding(.vertical, 6)
@@ -410,8 +429,10 @@ struct SessionCardView: View {
                 Circle().fill(Theme.runningTool).frame(width: 5, height: 5)
             }
             Text("\(block.subsTotal) sub-agents").font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
+                .help("\(block.subsRunning) of \(block.subsTotal) sub-agents running")
             Spacer(minLength: 0)
             Text(ageStr(block.age)).font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
+                .help("Last activity in this session")
         }
     }
 }
@@ -421,6 +442,7 @@ struct SessionCardView: View {
 struct ContextRing: View {
     let pct: Double
     let tokens: Int
+    var limit = 0
     var body: some View {
         ZStack {
             Circle().stroke(Theme.hairline, lineWidth: 5)
@@ -434,6 +456,8 @@ struct ContextRing: View {
             }
         }
         .frame(width: 52, height: 52)
+        .help(limit > 0 ? "Context window: \(tokens.formatted()) of \(limit.formatted()) tokens used"
+                        : "Context: \(tokens.formatted()) tokens")
     }
 }
 

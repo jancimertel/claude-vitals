@@ -40,23 +40,6 @@ final class Notifier: Sendable {
     }
 }
 
-/// Open the repo in VS Code; fall back to bundle id, then `/usr/bin/open`.
-enum EditorLauncher {
-    static func open(cwd: String) {
-        guard !cwd.isEmpty else { return }
-        let url = URL(fileURLWithPath: cwd)
-        let ws = NSWorkspace.shared
-        if let app = ws.urlForApplication(withBundleIdentifier: "com.microsoft.VSCode") {
-            ws.open([url], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
-        } else {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            p.arguments = ["-a", "Visual Studio Code", cwd]
-            try? p.run()
-        }
-    }
-}
-
 /// Launch-at-login via SMAppService (needs a bundled, signed .app).
 enum LaunchAtLogin {
     static var available: Bool { AppEnv.isBundled }
