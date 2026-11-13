@@ -180,6 +180,9 @@ func contextWindow(model: String, ctx: Int) -> Int {
     let oneMillion = model.contains("opus-4")        // opus 4.x (4-6/4-7/4-8 verified, forward-match)
         || model.contains("sonnet-4-5")
         || model.contains("sonnet-4-6")
+        // Every Claude 5 model has a 1M window: opus-5, opus-5-5, sonnet-5-5, haiku-5-5, fable-5-2, ...
+        // "-5" right after the family name, so opus-4-5 / sonnet-4-5 don't match here.
+        || model.range(of: #"(opus|sonnet|haiku|fable|mythos)-5"#, options: .regularExpression) != nil
     return (oneMillion || ctx > 200_000) ? 1_000_000 : 200_000
 }
 
