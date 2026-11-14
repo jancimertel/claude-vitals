@@ -52,14 +52,65 @@ final class Store: ObservableObject {
     private var loop: Task<Void, Never>?
     private var usageLoop: Task<Void, Never>?
     private var sweepLoop: Task<Void, Never>?
+    private var loadingLoop: Task<Void, Never>?   // set until the menu-bar intro hands off
+    private var loadingDone = false               // the first usage fetch returned
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
     private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
-    init() { start(); startUsage(); startSocket(); startSweep() }
+    init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
 
-    isolated deinit { loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); socket?.stop() }
+    isolated deinit {
+        loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); loadingLoop?.cancel(); socket?.stop()
+    }
+
+    /// The menu-bar intro, until the first usage fetch returns: a gray dot grows and opens into the
+    /// ring's outline (LoadingDot). Then the outline unwinds to the reading, takes its color, and the
+    /// number fades in. ~30 renders a second while it moves, none while the full ring waits.
+    private func startLoading() {
+        loadingLoop = Task { [weak self] in
+            let start = ContinuousClock.now
+            let dotTime = 0.3                                // the dot's own beat before it opens
+            var grow = 0.0
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.loadingDone { break }
+                if grow < 1 {
+                    let t = (ContinuousClock.now - start) / .seconds(1)
+                    // The ring then eases toward full size, so it never visibly stops to wait for
+                    // the fetch: 90% at ~1.2s, full (snapped from 99%) at ~2.1s.
+                    grow = t < dotTime ? 0.5 * (1 - pow(1 - t / dotTime, 2))
+                                       : 0.5 + 0.5 * (1 - exp(-(t - dotTime) / 0.4))
+                    if grow > 0.995 { grow = 1 }
+                    self.labelImage = self.renderLabelImage(nil, loading: grow)
+                }
+                try? await Task.sleep(for: .milliseconds(grow < 1 ? 33 : 100))   // grown: just wait
+            }
+            guard let self else { return }
+            // A fast fetch can land mid-growth: finish it quickly first.
+            while grow < 1 {
+                grow = min(grow + 0.15, 1)
+                self.labelImage = self.renderLabelImage(nil, loading: grow)
+                try? await Task.sleep(for: .milliseconds(33))
+            }
+            if let pct = self.freshUsage?.ring(self.menuSource)?.pct {
+                let drain = self.limitDrain()
+                for k in 1...12 {
+                    let r = 1 - pow(1 - Double(k) / 12, 3)      // ease out
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, reveal: r)
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+            // No data (the fetch failed): cut straight to the no-usage glyph.
+            self.loadingLoop = nil
+            self.renderedPct = -2                   // the intro drew over the image: render the real one
+            self.updateLabelImage()
+        }
+    }
+
+    /// The first fetch returned: the intro finishes and hands over the image (see startLoading).
+    private func stopLoading() { loadingDone = true }
 
     /// Hook events -> immediate targeted rebuild (no waiting for the poll tick).
     private func startSocket() {
@@ -109,8 +160,10 @@ final class Store: ObservableObject {
                     // first fetch can still use the old account's token. Fetch once more next tick.
                     recheck = switched
                     self.lastUsageFetch = Date()
-                    if let u = await RateLimitFetcher.fetch() {
-                        self.usage = u
+                    let fetched = await RateLimitFetcher.fetch()
+                    if let u = fetched { self.usage = u }
+                    self.stopLoading()
+                    if fetched != nil {
                         self.updateLabelImage()
                     } else if switched {
                         // Never keep showing the previous account's numbers as if they were current.
@@ -144,6 +197,7 @@ final class Store: ObservableObject {
     /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
     /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
     private func updateLabelImage() {
+        guard loadingLoop == nil else { return }       // the loading animation owns the image
         let pct = freshUsage?.ring(menuSource)?.pct
         let drain = limitDrain()
         let bucket: Int
@@ -199,12 +253,18 @@ final class Store: ObservableObject {
     /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (the window
     /// `ring(menuSource)` picks), or with no usage data, Aurora's status dot. Nil means MenuLabel
     /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
-    /// icon.
-    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1) -> NSImage? {
+    /// icon. `loading` draws the intro's LoadingDot instead, in both themes; `reveal` is the intro's
+    /// hand-off to the ring.
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1,
+                                  loading: Double? = nil,
+                                  reveal: Double = 1) -> NSImage? {
         let glyph: AnyView
-        if let pct {
+        if let loading {
+            glyph = AnyView(LoadingDot(grow: loading, theme: theme, size: 22))
+        } else if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
-            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, sweep: sweep))
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, sweep: sweep,
+                                       reveal: reveal))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {

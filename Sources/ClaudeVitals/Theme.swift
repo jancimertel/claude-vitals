@@ -91,6 +91,13 @@ enum Theme {
         theme.palette.usage[pct < 25 ? 0 : pct < 50 ? 1 : pct < 70 ? 2 : pct < 88 ? 3 : 4]
     }
 
+    /// The menu-bar intro's gray (LoadingDot), before there's a reading to color. Aurora's secondary
+    /// text on its navy tile. Classic has no tile and the image can't follow the menu bar's
+    /// appearance, so a mid gray that reads on light and dark bars.
+    static func loading(_ theme: AppTheme) -> Color {
+        theme == .aurora ? theme.palette.textSecondary : Color(hex: 0x8E8E93)
+    }
+
     static func state(_ d: Dot) -> Color {
         switch d {
         case .runningModel:      return runningModel
