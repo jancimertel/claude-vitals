@@ -100,70 +100,87 @@ struct LoaderRing: View {
     }
 }
 
-/// Strip under the header showing the two subscription windows as bars (only when data is fresh).
+/// Strip under the header showing the two subscription windows (only when data is fresh). Each is a
+/// caption row over a bar; side by side, the two line up with the card columns below.
 struct UsageStripView: View {
     let usage: RateUsage
     let theme: AppTheme
-    var narrow = false                                 // single-column popover: too tight for one row
+    var narrow = false                                 // single-column popover: stack the two windows
+
     var body: some View {
-        // TimelineView re-evaluates on open (and every 15s while open) so the "updated" age and reset
-        // countdowns are current each time the popover appears — no API call, just the clock.
+        // TimelineView re-evaluates on open (and every 15s while open) so the reset countdowns and
+        // time marks are current each time the popover appears — no API call, just the clock.
         TimelineView(.periodic(from: .now, by: 15)) { ctx in
             let usage = usage.current(now: ctx.date)
-            if narrow {
-                // Stack the windows so each bar gets the full width instead of being crammed on one line.
-                VStack(alignment: .leading, spacing: 6) {
-                    bar("5h", usage.fiveH, usage.fiveHReset, ctx.date)
-                    bar("7d", usage.sevenD, usage.sevenDReset, ctx.date)
-                    updated(ctx.date)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            } else {
-                HStack(spacing: 16) {
-                    bar("5h", usage.fiveH, usage.fiveHReset, ctx.date)
-                    bar("7d", usage.sevenD, usage.sevenDReset, ctx.date)
-                    Spacer(minLength: 0)
-                    updated(ctx.date)
-                }
+            let layout = narrow ? AnyLayout(VStackLayout(spacing: 10))
+                                : AnyLayout(HStackLayout(alignment: .top, spacing: 34))
+            layout {
+                window("5-hour", short: "5h", usage.fiveH, usage.fiveHReset, length: 5 * 3600, ctx.date)
+                window("Weekly", short: "7d", usage.sevenD, usage.sevenDReset, length: 7 * 86400, ctx.date)
             }
         }
-        .padding(.horizontal, 14).padding(.vertical, 8)
+        // 24 = grid padding + card padding, and 34 above = the gap between two cards' contents, so
+        // in two columns each window sits exactly over a card's content.
+        .padding(.horizontal, 24).padding(.top, 10).padding(.bottom, 14)   // room under the bars
         .background(Theme.scrim)
     }
 
-    private func updated(_ now: Date) -> some View {
-        Text("updated \(ageStr(Int(max(0, now.timeIntervalSince(usage.capturedAt)))))")
-            .font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
-            .help("Subscription usage, last fetched at \(usage.capturedAt.formatted(date: .omitted, time: .shortened)). "
-                  + "Refreshed at most every 5 min while agents are active.")
-    }
-
-    private func barHelp(_ label: String, _ pct: Double, _ reset: Date?, _ now: Date) -> String {
-        let window = label == "5h" ? "5-hour session limit" : "Weekly limit"
-        var s = "\(window): \(Int(pct))% used"
-        if let reset, let r = resetIn(reset, now: now) {
-            s += ", resets in \(r) (\(reset.formatted(date: .abbreviated, time: .shortened)))"
-        }
-        return s
-    }
-
-    @ViewBuilder private func bar(_ label: String, _ pct: Double?, _ reset: Date?, _ now: Date) -> some View {
+    @ViewBuilder
+    private func window(_ title: String, short: String, _ pct: Double?, _ reset: Date?,
+                        length: TimeInterval, _ now: Date) -> some View {
         if let pct {
             let c = Theme.usage(pct, theme)
-            HStack(spacing: 6) {
-                Text(label).font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
-                ZStack(alignment: .leading) {
-                    Capsule().fill(Theme.hairline).frame(width: 64, height: 5)
-                    Capsule().fill(c).frame(width: 64 * min(max(pct, 0), 100) / 100, height: 5)
+            // Share of the window already passed, known only from its reset time.
+            let passed = reset.map { min(max(1 - $0.timeIntervalSince(now) / length, 0), 1) }
+            VStack(spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(title.uppercased()).font(.system(size: 9)).tracking(0.4)
+                        .foregroundStyle(Theme.textTertiary)
+                    if let r = resetIn(reset, now: now) {
+                        Text(r == "now" ? "resets now" : "resets in \(r)")
+                            .font(.system(size: 9)).monospacedDigit().foregroundStyle(Theme.textTertiary)
+                    }
+                    Spacer(minLength: 4)
+                    Text("\(Int(pct))%").font(.system(size: 12, weight: .semibold)).monospacedDigit()
+                        .foregroundStyle(pct >= 100 ? Theme.danger : Theme.textPrimary)
                 }
-                Text("\(Int(pct))%").font(.system(size: 10, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(pct >= 100 ? Theme.danger : Theme.textPrimary)
-                if let r = resetIn(reset, now: now) {
-                    Text("· \(r)").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
+                .help(windowHelp(title, pct, reset))
+                track(pct, color: c, passed: passed, short: short, length: length)
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+
+    /// The usage fill over a faint band showing how much of the window has passed, ending in a mark.
+    /// Fill past the mark means usage is running ahead of time.
+    private func track(_ pct: Double, color: Color, passed: Double?, short: String,
+                       length: TimeInterval) -> some View {
+        GeometryReader { g in
+            let w = g.size.width
+            ZStack(alignment: .leading) {
+                Capsule().fill(Theme.hairline)
+                if let passed {
+                    Capsule().fill(Theme.textTertiary.opacity(0.22)).frame(width: w * passed)
+                }
+                Capsule().fill(color).frame(width: w * min(max(pct, 0), 100) / 100)
+                if let passed {
+                    let elapsed = Int(length * passed)
+                    Capsule().fill(Theme.textSecondary).frame(width: 2, height: 10)
+                        .frame(width: 14, height: 16)          // easier to hover than the 2pt mark
+                        .contentShape(Rectangle())
+                        .help("Time mark: \(durStr(elapsed)) of \(short) passed (\(Int((passed * 100).rounded()))%). "
+                              + "Usage past the mark is ahead of pace.")
+                        .offset(x: min(max(w * passed, 1), w - 1) - 7)
                 }
             }
-            .help(barHelp(label, pct, reset, now))
         }
+        .frame(height: 4)
+    }
+
+    private func windowHelp(_ title: String, _ pct: Double, _ reset: Date?) -> String {
+        var s = "\(title) limit: \(Int(pct))% used"
+        if let reset { s += ", resets \(reset.formatted(date: .abbreviated, time: .shortened))" }
+        return s
     }
 }
 
@@ -209,7 +226,7 @@ struct PopoverView: View {
             }
 
             Divider().overlay(Theme.hairline)
-            FooterView(store: store, narrow: cols == 1)
+            FooterView(store: store)
         }
         .id(store.theme)                               // rebuild so every child picks up the new Theme colors
         .frame(width: CGFloat(cols) * 264 + CGFloat(cols - 1) * 10 + 24)
@@ -529,45 +546,68 @@ struct EmptyStateView: View {
 
 struct FooterView: View {
     @ObservedObject var store: Store
-    @State private var launch = LaunchAtLogin.isEnabled
-    var narrow = false                                 // single-column popover: drop the Refresh title to fit
     @State private var sound = Chime.enabled
 
     var body: some View {
-        HStack(spacing: narrow ? 10 : 12) {
-            Button { store.refreshNow() } label: {
-                if narrow {
-                    Image(systemName: "arrow.clockwise")
-                } else {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
+        HStack(spacing: 2) {
+            FooterIcon("arrow.clockwise", help: "Refresh") { store.refreshNow() }
+
+            FooterIcon("circle.lefthalf.filled", help: "Theme: \(store.theme.title), click to switch") {
+                let all = AppTheme.allCases
+                store.theme = all[(all.firstIndex(of: store.theme)! + 1) % all.count]
             }
-            .buttonStyle(.plain)
-            .help("Refresh")
 
-            Picker("Theme", selection: $store.theme) {
-                ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
-            }
-            .pickerStyle(.segmented).labelsHidden().controlSize(.mini).fixedSize()
-            .help("Color theme")
-
-            Toggle("Sound", isOn: $sound)
-                .toggleStyle(.switch).controlSize(.mini).fixedSize()
-                .onChange(of: sound) { _, newValue in Chime.enabled = newValue }
-
-            if LaunchAtLogin.available {
-                Toggle("Launch at login", isOn: $launch)
-                    .toggleStyle(.switch).controlSize(.mini).fixedSize()
-                    .onChange(of: launch) { _, newValue in LaunchAtLogin.set(newValue) }
+            FooterIcon(sound ? "speaker.wave.2.fill" : "speaker.slash.fill",
+                       help: sound ? "Sound on, click to mute" : "Sound off, click to unmute") {
+                sound.toggle()
+                Chime.enabled = sound
             }
 
             Spacer()
-            Button { NSApp.terminate(nil) } label: { Text("Quit") }
-                .buttonStyle(.plain)
+            if let usage = store.freshUsage {
+                // Re-evaluated on open and every 15s while open, so the age is current.
+                TimelineView(.periodic(from: .now, by: 15)) { ctx in
+                    Text("updated \(ageStr(Int(max(0, ctx.date.timeIntervalSince(usage.capturedAt)))))")
+                        .font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
+                        .help("Subscription usage, last fetched at "
+                              + "\(usage.capturedAt.formatted(date: .omitted, time: .shortened)). "
+                              + "Refreshed at most every 5 min while agents are active.")
+                }
+                .padding(.trailing, 4)
+            }
+            FooterIcon("power", help: "Quit Claude Vitals") { NSApp.terminate(nil) }
         }
-        .font(.system(size: 11))
-        .foregroundStyle(Theme.textSecondary)
-        .padding(.horizontal, 12).padding(.vertical, 8)
+        .padding(.horizontal, 8).padding(.vertical, 5)
         .background(Theme.scrim)
+    }
+}
+
+/// Borderless footer icon button with a hover highlight; `help` is its tooltip.
+struct FooterIcon: View {
+    let symbol: String
+    let help: String
+    let action: () -> Void
+    @State private var hover = false
+
+    init(_ symbol: String, help: String, action: @escaping () -> Void) {
+        self.symbol = symbol
+        self.help = help
+        self.action = action
+    }
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 12, weight: .medium))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: 26, height: 22)
+                .foregroundStyle(hover ? Theme.textPrimary : Theme.textSecondary)
+                .background(hover ? Theme.cardHover : .clear, in: RoundedRectangle(cornerRadius: 6))
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(help)
+        .accessibilityLabel(help)
     }
 }
