@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 
 // MARK: - Menu-bar label
@@ -74,14 +75,28 @@ struct LoaderRing: View {
                         GeometryReader { g in Rectangle().frame(width: g.size.width * sweep) }
                     }
             } else {
-                Text("\(Int(clamped.rounded()))")        // the % inside the ring
+                let number = "\(Int(clamped.rounded()))"      // the % inside the ring
+                let ink = Self.inkBounds(number, size: size * 0.44)
+                Text(number)
                     .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
-                    .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
+                    .lineLimit(1).fixedSize()
                     .foregroundStyle(color)
-                    .frame(width: size * 0.92)
+                    // Center the ink, not the line box: the box leaves digits ~0.4pt high (room for
+                    // descenders) and some, like "1", off to one side. Visible at menu-bar size.
+                    .alignmentGuide(HorizontalAlignment.center) { $0[.leading] + ink.midX }
+                    .alignmentGuide(VerticalAlignment.center) { $0[.firstTextBaseline] - ink.midY }
             }
         }
         .frame(width: size, height: size)
+    }
+
+    /// The ink of `text` in the ring's font, relative to the text origin (x right, y up from the
+    /// baseline).
+    private static func inkBounds(_ text: String, size: CGFloat) -> CGRect {
+        let base = NSFont.systemFont(ofSize: size, weight: .bold)
+        let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
     }
 }
 
