@@ -155,6 +155,10 @@ struct UsageStripView: View {
     /// Fill past the mark means usage is running ahead of time.
     private static let barHeight: CGFloat = 6
 
+    /// A non-zero fill is at least as wide as the bar is tall. Narrower, the capsule turns into an
+    /// upright pill whose left end is tighter than the track's, which looks cut off.
+    private static func span(_ width: CGFloat) -> CGFloat { width > 0 ? max(width, barHeight) : 0 }
+
     private func track(_ pct: Double, color: Color, passed: Double?, short: String,
                        length: TimeInterval) -> some View {
         GeometryReader { g in
@@ -164,9 +168,11 @@ struct UsageStripView: View {
                 // unsized capsules would stretch to it.
                 Capsule().fill(Theme.hairline).frame(height: Self.barHeight)
                 if let passed {
-                    Capsule().fill(Theme.textTertiary.opacity(0.22)).frame(width: w * passed, height: Self.barHeight)
+                    Capsule().fill(Theme.textTertiary.opacity(0.22))
+                        .frame(width: Self.span(w * passed), height: Self.barHeight)
                 }
-                Capsule().fill(color).frame(width: w * min(max(pct, 0), 100) / 100, height: Self.barHeight)
+                Capsule().fill(color)
+                    .frame(width: Self.span(w * min(max(pct, 0), 100) / 100), height: Self.barHeight)
                 if let passed {
                     let elapsed = Int(length * passed)
                     Capsule().fill(Theme.textSecondary).frame(width: 2, height: Self.barHeight + 4)
