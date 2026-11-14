@@ -227,9 +227,11 @@ struct PopoverView: View {
 
 /// MenuBarExtra sizes its window once and doesn't follow later content changes: it keeps the
 /// launch-time height (clipping the cards) or a 2-column width after dropping to 1 column.
-/// Resize it to the content ourselves, keeping the top and right edges under the menu-bar item.
+/// Resize it to the content ourselves, keeping the top and right edges under the menu-bar item,
+/// and round its corners.
 struct WindowFitter: NSViewRepresentable {
     let size: CGSize
+    static let cornerRadius: CGFloat = 16
 
     func makeNSView(context: Context) -> NSView { NSView() }
 
@@ -244,7 +246,20 @@ struct WindowFitter: NSViewRepresentable {
             frame.size.height = min(frame.height, top - bounds.minY)
             frame.origin.x = max(bounds.minX, min(window.frame.maxX, bounds.maxX) - frame.width)
             frame.origin.y = top - frame.height
-            if frame != window.frame { window.setFrame(frame, display: true) }
+            var changed = frame != window.frame
+            if changed { window.setFrame(frame, display: true) }
+            // The system rounds this borderless window by a small radius; round it like macOS 27
+            // windows instead. The frame view already clips to its bounds, so a layer radius is enough.
+            if let frameView = window.contentView?.superview {
+                frameView.wantsLayer = true
+                if let layer = frameView.layer, layer.cornerRadius != Self.cornerRadius {
+                    layer.cornerRadius = Self.cornerRadius
+                    layer.cornerCurve = .continuous
+                    layer.masksToBounds = true
+                    changed = true
+                }
+            }
+            if changed { window.invalidateShadow() }   // shadow follows the new corners and size
         }
     }
 }
