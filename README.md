@@ -17,8 +17,8 @@ swift run ClaudeVitals --dump   # headless: print the snapshot and exit (data-la
 
 **Real app (bundled — enables notifications + launch-at-login):**
 ```bash
-./make_app.sh            # builds release, wraps into an ad-hoc-signed ClaudeVitals.app
-open ClaudeVitals.app
+./make_app.sh            # builds release, wraps into an ad-hoc-signed "Claude Vitals.app"
+open "Claude Vitals.app"
 # or: ./make_app.sh --install   # moves it to /Applications and relaunches; rerun after each change
 ```
 

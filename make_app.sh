@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build release + wrap into an ad-hoc-signed ClaudeVitals.app (LSUIElement, bundle id)
+# Build release + wrap into an ad-hoc-signed "Claude Vitals.app" (LSUIElement, bundle id)
 # so UNUserNotifications + SMAppService work. Personal use: ad-hoc signing is enough.
-# Usage: ./make_app.sh             build ./ClaudeVitals.app
+# Usage: ./make_app.sh             build "./Claude Vitals.app"
 #        ./make_app.sh --install   build, move it to /Applications, relaunch
 set -euo pipefail
 cd "$(dirname "$0")"
 
-APP="ClaudeVitals.app"
+APP="Claude Vitals.app"
+OLD_APP="ClaudeVitals.app"      # the bundle's name before the rename
 BIN="ClaudeVitals"
 BUNDLE_ID="com.janci.claudevitals"
 VERSION="0.1.0"
@@ -56,7 +57,19 @@ PLIST
 echo "==> ad-hoc codesign"
 codesign --force --deep --sign - "$APP"
 
-# --install: replace /Applications/ClaudeVitals.app with this build and relaunch it. The build is
+# A leftover bundle under the old name has the same bundle id, so macOS may launch it at login
+# instead of this one. Only point it out: deleting is the user's call.
+warn_old_app() {
+    local old
+    for old in "$(pwd)/$OLD_APP" "/Applications/$OLD_APP"; do
+        if [[ -e "$old" ]]; then
+            echo "==> warning: an old copy is still at $old (the app is now \"$APP\")."
+            echo "    Delete it so macOS doesn't launch it at login: rm -rf \"$old\""
+        fi
+    done
+}
+
+# --install: replace "/Applications/Claude Vitals.app" with this build and relaunch it. The build is
 # moved, not copied, so Spotlight and Launchpad list one Claude Vitals instead of two.
 if [[ "${1:-}" == "--install" ]]; then
     DEST="/Applications/$APP"
@@ -66,8 +79,10 @@ if [[ "${1:-}" == "--install" ]]; then
     mv "$APP" "$DEST"
     open "$DEST"
     echo "==> done: $DEST is running"
+    warn_old_app
     exit 0
 fi
 
 echo "==> done: $(pwd)/$APP"
-echo "Run: open $APP   (or ./make_app.sh --install to put it in /Applications)"
+echo "Run: open \"$APP\"   (or ./make_app.sh --install to put it in /Applications)"
+warn_old_app
