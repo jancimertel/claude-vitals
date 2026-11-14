@@ -571,6 +571,10 @@ struct FooterView: View {
             }
 
             Spacer()
+            FooterIcon("power", help: "Quit Claude Vitals") { NSApp.terminate(nil) }
+        }
+        // Centered on the whole footer, not in the gap between the icon groups (3 left, 1 right).
+        .overlay {
             if let usage = store.freshUsage {
                 // Re-evaluated on open and every 15s while open, so the age is current.
                 TimelineView(.periodic(from: .now, by: 15)) { ctx in
@@ -580,9 +584,7 @@ struct FooterView: View {
                               + "\(usage.capturedAt.formatted(date: .omitted, time: .shortened)). "
                               + "Refreshed at most every 5 min while agents are active.")
                 }
-                .padding(.trailing, 4)
             }
-            FooterIcon("power", help: "Quit Claude Vitals") { NSApp.terminate(nil) }
         }
         .padding(.horizontal, 8).padding(.vertical, 5)
         .background(Theme.scrim)
