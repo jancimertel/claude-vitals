@@ -235,16 +235,24 @@ final class Store: ObservableObject {
         return Date() >= reset && lastUsageFetch < reset
     }
 
-    /// Once a minute while at the limit, draw the heartbeat trace in from left to right (~0.8s).
-    /// That's 12 renders a minute, and none when below the limit.
+    /// Once a minute while at the limit, a heartbeat: the trace erases from the left (~0.45s), then
+    /// draws back in from the left (~0.6s), like a monitor's line. That's 32 renders a minute, and
+    /// none when below the limit.
     private func startSweep() {
         sweepLoop = Task { [weak self] in
+            func ease(_ x: Double) -> Double { x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2 }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
                 guard let self, let pct = self.usage?.ring(self.menuSource)?.pct, let drain = self.limitDrain() else { continue }
-                for k in 0...12 {
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, sweep: Double(k) / 12)
-                    try? await Task.sleep(for: .milliseconds(66))
+                for k in 1...14 {
+                    let t = ease(Double(k) / 14)
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+                for k in 1...18 {
+                    let t = ease(Double(k) / 18)
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (0, t))
+                    try? await Task.sleep(for: .milliseconds(33))
                 }
             }
         }
@@ -255,7 +263,8 @@ final class Store: ObservableObject {
     /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
     /// icon. `loading` draws the intro's LoadingDot instead, in both themes; `reveal` is the intro's
     /// hand-off to the ring.
-    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1,
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil,
+                                  trace: (from: Double, to: Double) = (0, 1),
                                   loading: Double? = nil,
                                   reveal: Double = 1) -> NSImage? {
         let glyph: AnyView
@@ -263,7 +272,7 @@ final class Store: ObservableObject {
             glyph = AnyView(LoadingDot(grow: loading, theme: theme, size: 22))
         } else if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
-            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, sweep: sweep,
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, trace: trace,
                                        reveal: reveal))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))

@@ -72,8 +72,9 @@ struct LoaderRing: View {
     /// At the limit: the share of the wait until the reset still left (1 → 0). The ring shows this
     /// instead of the usage, emptying as the reset approaches.
     var drain: Double? = nil
-    /// At the limit: how much of the heartbeat trace is drawn, left to right (the once-a-minute sweep).
-    var sweep: Double = 1
+    /// At the limit: the part of the heartbeat trace drawn, as shares of its length. The
+    /// once-a-minute beat erases it from the left, then draws it back in from the left.
+    var trace: (from: Double, to: Double) = (0, 1)
     /// The menu-bar intro's hand-off (0 → 1): the full outline unwinds to the reading, its gray
     /// turns to the reading's color, and the number fades in.
     var reveal: Double = 1
@@ -98,13 +99,11 @@ struct LoaderRing: View {
             if clamped >= 100 {
                 // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
                 // show a heartbeat trace instead.
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: size * 0.42, weight: .bold))
-                    .foregroundStyle(color)
+                HeartbeatTrace().trim(from: trace.from, to: trace.to)
+                    .stroke(color, style: StrokeStyle(lineWidth: size * 0.05, lineCap: .round,
+                                                      lineJoin: .round))
+                    .frame(width: size * 0.39, height: size * 0.40)
                     .opacity(reveal)
-                    .mask {
-                        GeometryReader { g in Rectangle().frame(width: g.size.width * sweep) }
-                    }
             } else {
                 let number = "\(Int(clamped.rounded()))"      // the % inside the ring
                 let ink = Self.inkBounds(number, size: size * 0.44)
@@ -129,6 +128,22 @@ struct LoaderRing: View {
         let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
         return CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+    }
+}
+
+/// The heartbeat inside the ring at the limit: SF Symbols' waveform.path.ecg, redrawn as one path
+/// so it can be drawn and erased along its length (a symbol can only be masked, which cut the
+/// stroke with a straight edge).
+struct HeartbeatTrace: Shape {
+    func path(in rect: CGRect) -> Path {
+        // The symbol's centerline, as shares of the rect (y down): baseline, spike up, dip below
+        // the baseline, a smaller peak, back to the baseline.
+        let points: [(CGFloat, CGFloat)] = [
+            (0, 0.54), (0.255, 0.54), (0.375, 0), (0.543, 1), (0.717, 0.24), (0.8, 0.54), (1, 0.54),
+        ]
+        var p = Path()
+        p.addLines(points.map { CGPoint(x: rect.minX + $0.0 * rect.width, y: rect.minY + $0.1 * rect.height) })
+        return p
     }
 }
 
