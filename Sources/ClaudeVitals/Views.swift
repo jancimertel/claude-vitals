@@ -153,19 +153,23 @@ struct UsageStripView: View {
 
     /// The usage fill over a faint band showing how much of the window has passed, ending in a mark.
     /// Fill past the mark means usage is running ahead of time.
+    private static let barHeight: CGFloat = 6
+
     private func track(_ pct: Double, color: Color, passed: Double?, short: String,
                        length: TimeInterval) -> some View {
         GeometryReader { g in
             let w = g.size.width
             ZStack(alignment: .leading) {
-                Capsule().fill(Theme.hairline)
+                // Explicit heights: the mark's taller hover area sets the ZStack's height, and
+                // unsized capsules would stretch to it.
+                Capsule().fill(Theme.hairline).frame(height: Self.barHeight)
                 if let passed {
-                    Capsule().fill(Theme.textTertiary.opacity(0.22)).frame(width: w * passed)
+                    Capsule().fill(Theme.textTertiary.opacity(0.22)).frame(width: w * passed, height: Self.barHeight)
                 }
-                Capsule().fill(color).frame(width: w * min(max(pct, 0), 100) / 100)
+                Capsule().fill(color).frame(width: w * min(max(pct, 0), 100) / 100, height: Self.barHeight)
                 if let passed {
                     let elapsed = Int(length * passed)
-                    Capsule().fill(Theme.textSecondary).frame(width: 2, height: 10)
+                    Capsule().fill(Theme.textSecondary).frame(width: 2, height: Self.barHeight + 4)
                         .frame(width: 14, height: 16)          // easier to hover than the 2pt mark
                         .contentShape(Rectangle())
                         .help("Time mark: \(durStr(elapsed)) of \(short) passed (\(Int((passed * 100).rounded()))%). "
@@ -173,8 +177,9 @@ struct UsageStripView: View {
                         .offset(x: min(max(w * passed, 1), w - 1) - 7)
                 }
             }
+            .frame(height: g.size.height)
         }
-        .frame(height: 4)
+        .frame(height: Self.barHeight)
     }
 
     private func windowHelp(_ title: String, _ pct: Double, _ reset: Date?) -> String {
@@ -477,9 +482,11 @@ struct ContextRing: View {
     var limit = 0
     var body: some View {
         ZStack {
-            Circle().stroke(Theme.hairline, lineWidth: 5)
-            Circle().trim(from: 0, to: min(1, max(0, pct / 100)))
-                .stroke(Theme.ring(pct), style: StrokeStyle(lineWidth: 5, lineCap: .round))
+            // Inset by half the line so the stroke stays inside the frame, which then matches the
+            // ring's visible size and lines up with the usage bars above.
+            Circle().inset(by: 3).stroke(Theme.hairline, lineWidth: 6)
+            Circle().inset(by: 3).trim(from: 0, to: min(1, max(0, pct / 100)))
+                .stroke(Theme.ring(pct), style: StrokeStyle(lineWidth: 6, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             VStack(spacing: 0) {
                 Text("\(Int(pct))%").font(.system(size: 12, weight: .semibold)).monospacedDigit()
@@ -487,7 +494,7 @@ struct ContextRing: View {
                 Text(human(tokens)).font(.system(size: 8)).foregroundStyle(Theme.textTertiary)
             }
         }
-        .frame(width: 52, height: 52)
+        .frame(width: 58, height: 58)
         .help(limit > 0 ? "Context window: \(tokens.formatted()) of \(limit.formatted()) tokens used"
                         : "Context: \(tokens.formatted()) tokens")
     }
