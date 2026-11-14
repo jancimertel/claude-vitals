@@ -38,6 +38,15 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Which window the menu-bar ring shows below the limit. Set from the right-click menu.
+    @Published var menuSource = MenuSource.saved {
+        didSet {
+            MenuSource.saved = menuSource
+            renderedPct = -2                  // the new window can round to the same %: force a re-render
+            updateLabelImage()
+        }
+    }
+
     private let collector = Collector()
     private var tracker = TransitionTracker()
     private var loop: Task<Void, Never>?
@@ -135,7 +144,7 @@ final class Store: ObservableObject {
     /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
     /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
     private func updateLabelImage() {
-        let pct = freshUsage?.menuPct
+        let pct = freshUsage?.ring(menuSource)?.pct
         let drain = limitDrain()
         let bucket: Int
         if let drain {
@@ -153,7 +162,7 @@ final class Store: ObservableObject {
     /// sees 100%, 0 at the reset. Nil when not at the limit or the reset time is unknown. The start is
     /// saved per reset time, so relaunching the app mid-wait doesn't refill the ring.
     private func limitDrain(now: Date = Date()) -> Double? {
-        guard let u = freshUsage, let pct = u.menuPct, pct >= 100, let reset = u.menuReset else { return nil }
+        guard let u = freshUsage, let w = u.ring(menuSource), w.pct >= 100, let reset = w.reset else { return nil }
         let d = UserDefaults.standard
         if d.double(forKey: "limitReset") != reset.timeIntervalSince1970 {
             d.set(reset.timeIntervalSince1970, forKey: "limitReset")
@@ -168,7 +177,7 @@ final class Store: ObservableObject {
     /// The limit's reset time has passed but the usage shown is from before it: fetch fresh numbers
     /// instead of waiting for the next active-session fetch.
     private func limitResetPassed() -> Bool {
-        guard let u = usage, (u.menuPct ?? 0) >= 100, let reset = u.menuReset else { return false }
+        guard let w = usage?.ring(menuSource), w.pct >= 100, let reset = w.reset else { return false }
         return Date() >= reset && lastUsageFetch < reset
     }
 
@@ -178,7 +187,7 @@ final class Store: ObservableObject {
         sweepLoop = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard let self, let pct = self.usage?.menuPct, let drain = self.limitDrain() else { continue }
+                guard let self, let pct = self.usage?.ring(self.menuSource)?.pct, let drain = self.limitDrain() else { continue }
                 for k in 0...12 {
                     self.labelImage = self.renderLabelImage(pct, drain: drain, sweep: Double(k) / 12)
                     try? await Task.sleep(for: .milliseconds(66))
@@ -187,9 +196,10 @@ final class Store: ObservableObject {
         }
     }
 
-    /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (5h window),
-    /// or with no usage data, Aurora's status dot. Nil means MenuLabel falls back to Classic's
-    /// SF Symbol dot. Aurora puts either glyph on a navy tile, like the app icon.
+    /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (the window
+    /// `ring(menuSource)` picks), or with no usage data, Aurora's status dot. Nil means MenuLabel
+    /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
+    /// icon.
     private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1) -> NSImage? {
         let glyph: AnyView
         if let pct {

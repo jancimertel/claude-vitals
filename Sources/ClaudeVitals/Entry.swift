@@ -91,6 +91,26 @@ struct Entry {
         let r8 = resolveState(heuristic: heuristic, isLive: true, liveConfirmed: false, hook: hook(.ended, "ended", at: 0, alive: false), transcriptMtime: now, now: now)
         check("hookLivenessOverridesProcessLiveness", r8.dot == .ended && r8.usedHook && !r8.live)
 
+        // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
+        let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
+        func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {
+            RateUsage(fiveH: f, sevenD: w, fiveHReset: fr, sevenDReset: wr, status: nil, capturedAt: now)
+        }
+        check("ring5hBelowLimit", u(40, r1h, 70, r3d).ring(.fiveHour) == RingWindow(pct: 40, reset: r1h))
+        check("ringHigherBelowLimit", u(40, r1h, 70, r3d).ring(.higher) == RingWindow(pct: 70, reset: r3d))
+        check("ringHigherTiePicks5h", u(50, r1h, 50, r3d).ring(.higher) == RingWindow(pct: 50, reset: r1h))
+        check("ring5hFallsBackToWeekly", u(nil, nil, 30, r3d).ring(.fiveHour) == RingWindow(pct: 30, reset: r3d))
+        check("ringWeeklyFullOverrides5h", u(20, r1h, 100, r3d).ring(.fiveHour) == RingWindow(pct: 100, reset: r3d))
+        check("ringBothFullPicksLaterReset", u(100, r1h, 100, r3d).ring(.fiveHour) == RingWindow(pct: 100, reset: r3d))
+        check("ringModesAgreeAtLimit", u(100, r1h, 60, r3d).ring(.fiveHour) == u(100, r1h, 60, r3d).ring(.higher))
+        check("ringFullWithKnownResetWins", u(100, nil, 100, r3d).ring(.fiveHour) == RingWindow(pct: 100, reset: r3d))
+        check("ringWeeklyResetPassedBackTo5h",
+              u(20, r1h, 100, now.addingTimeInterval(-1)).current(now: now).ring(.fiveHour) == RingWindow(pct: 20, reset: r1h))
+        check("ringNoData", u(nil, nil, nil, nil).ring(.higher) == nil)
+        UserDefaults.standard.set("bogus", forKey: "menuSource")
+        check("menuSourceGarbageIsFiveHour", MenuSource.saved == .fiveHour)
+        UserDefaults.standard.removeObject(forKey: "menuSource")
+
         exit(0)
     }
 

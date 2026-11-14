@@ -12,12 +12,26 @@ struct RateUsage: Sendable {
 
     var maxPct: Double? { [fiveH, sevenD].compactMap { $0 }.max() }
 
-    /// What the menu-bar ring shows: always the 5h session window — the limit that actually gates
-    /// day-to-day work. Falls back to the weekly value only when 5h is missing from the headers.
-    var menuPct: Double? { fiveH ?? sevenD }
-
-    /// When the window behind `menuPct` resets.
-    var menuReset: Date? { fiveH != nil ? fiveHReset : sevenDReset }
+    /// The window the menu-bar ring shows. Below the limit, the one `source` picks (5h falls back to
+    /// weekly when the headers lack it). At the limit, the window that blocks, in either mode, since
+    /// being blocked must never hide behind a lower 5h number. With both full, the later reset wins:
+    /// the user waits for that one. The percent and its reset always come from the same window, so the
+    /// drain counts down to the right time.
+    func ring(_ source: MenuSource) -> RingWindow? {
+        let windows = [(fiveH, fiveHReset), (sevenD, sevenDReset)]
+            .compactMap { pct, reset in pct.map { RingWindow(pct: $0, reset: reset) } }
+        // max(by:) keeps the first of equal elements, so ties go to 5h.
+        func highest(_ ws: [RingWindow]) -> RingWindow? { ws.max { $0.pct < $1.pct } }
+        let full = windows.filter { $0.pct >= 100 }
+        if !full.isEmpty {
+            let timed = full.filter { $0.reset != nil }
+            return timed.max { $0.reset! < $1.reset! } ?? highest(full)
+        }
+        switch source {
+        case .fiveHour: return windows.first
+        case .higher: return highest(windows)
+        }
+    }
 
     /// A window whose reset time has passed is empty: 0% until the next message starts a new one.
     /// This lets the display drop at the reset without an API call, which would itself use quota and
@@ -123,4 +137,22 @@ func durStr(_ s: Int) -> String {
     if s < 3600 { return "\(s / 60)m" }
     if s < 86400 { return "\(s / 3600)h\((s % 3600) / 60)m" }
     return "\(s / 86400)d\((s % 86400) / 3600)h"
+}
+
+/// Which usage window the menu-bar ring shows below the limit (set from the right-click menu).
+enum MenuSource: String, CaseIterable {
+    case fiveHour, higher
+
+    var title: String { self == .fiveHour ? "5-Hour Window" : "Whichever Is Higher" }
+
+    static var saved: MenuSource {
+        get { UserDefaults.standard.string(forKey: "menuSource").flatMap(MenuSource.init) ?? .fiveHour }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "menuSource") }
+    }
+}
+
+/// One usage window as the ring draws it: its percent and when it resets.
+struct RingWindow: Equatable, Sendable {
+    var pct: Double
+    var reset: Date?
 }
