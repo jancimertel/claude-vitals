@@ -29,8 +29,8 @@ NSGradient(starting: rgb(0x252C3D), ending: rgb(0x111623))!.draw(in: shape, angl
 
 // Usage ring: muted track, then a 69% arc running teal to violet.
 let center = CGPoint(x: size / 2, y: size / 2)
-let radius: CGFloat = 270
-let lineWidth: CGFloat = 64
+let radius: CGFloat = 263
+let lineWidth: CGFloat = 78        // 13% of the ring's outer diameter, like the menu-bar ring
 let track = NSBezierPath()
 track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
 track.lineWidth = lineWidth
