@@ -35,9 +35,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// for this, so a local event monitor catches the click before the status-bar button sees it.
     private func installContextMenu() {
         rightClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.rightMouseDown, .leftMouseDown]) { event in
+            guard event.window?.className == "NSStatusBarWindow" else { return event }
             let isContextClick = event.type == .rightMouseDown || event.modifierFlags.contains(.control)
-            guard isContextClick, event.window?.className == "NSStatusBarWindow",
-                  let button = Self.statusButton() else { return event }
+            guard isContextClick, let button = Self.statusButton() else {
+                self.store.catchUp()   // this click opens the popover: draw current data from its first frame
+                return event
+            }
             let menu = NSMenu()
             menu.addItem(.sectionHeader(title: "Menu Bar Shows:"))
             for source in MenuSource.allCases {
@@ -68,7 +71,7 @@ struct ClaudeVitalsApp: App {
         MenuBarExtra {
             PopoverView(store: delegate.store)
         } label: {
-            MenuLabel(store: delegate.store)
+            MenuLabel(label: delegate.store.label)
         }
         .menuBarExtraStyle(.window)
     }

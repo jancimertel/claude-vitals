@@ -24,11 +24,32 @@ struct TransitionTracker {
     }
 }
 
+/// What the menu-bar label draws.
+@MainActor
+final class MenuLabelModel: ObservableObject {
+    @Published var image: NSImage?   // colored usage-loader glyph (nil -> fall back to dot)
+    @Published var running = 0
+}
+
 @MainActor
 final class Store: ObservableObject {
-    @Published var snap: Snapshot = .empty
+    /// The latest snapshot. Not published: MenuBarExtra keeps the popover's view tree alive while
+    /// it's closed, so publishing every hook event re-rendered the hidden popover. It draws `shown`.
+    private(set) var snap: Snapshot = .empty
+    /// What the popover draws: follows `snap` only while the popover is open, and catches up as it opens.
+    @Published private(set) var shown: Snapshot = .empty
     @Published var usage: RateUsage?      // real subscription usage (live, from rate-limit headers)
-    @Published var labelImage: NSImage?   // colored usage-loader glyph (nil -> fall back to dot)
+    /// The menu-bar label's state, in its own object so ring animations and the running dot don't
+    /// re-render the popover either.
+    let label = MenuLabelModel()
+
+    var popoverOpen = false {
+        didSet { if popoverOpen { catchUp() } }
+    }
+
+    /// Hand the popover the latest snapshot. Also called on the click that opens it, since the
+    /// visibility notice behind `popoverOpen` lands only after the window is on screen.
+    func catchUp() { shown = snap }
     @Published var theme = AppTheme.saved {
         didSet {
             AppTheme.saved = theme
@@ -56,7 +77,7 @@ final class Store: ObservableObject {
     private var loadingDone = false               // the first usage fetch returned
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
-    private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
+    private var renderedPct: Int = -2     // bucket the current label image was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
     init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
@@ -83,7 +104,7 @@ final class Store: ObservableObject {
                     grow = t < dotTime ? 0.5 * (1 - pow(1 - t / dotTime, 2))
                                        : 0.5 + 0.5 * (1 - exp(-(t - dotTime) / 0.4))
                     if grow > 0.995 { grow = 1 }
-                    self.labelImage = self.renderLabelImage(nil, loading: grow)
+                    self.label.image = self.renderLabelImage(nil, loading: grow)
                 }
                 try? await Task.sleep(for: .milliseconds(grow < 1 ? 33 : 100))   // grown: just wait
             }
@@ -91,14 +112,14 @@ final class Store: ObservableObject {
             // A fast fetch can land mid-growth: finish it quickly first.
             while grow < 1 {
                 grow = min(grow + 0.15, 1)
-                self.labelImage = self.renderLabelImage(nil, loading: grow)
+                self.label.image = self.renderLabelImage(nil, loading: grow)
                 try? await Task.sleep(for: .milliseconds(33))
             }
             if let pct = self.freshUsage?.ring(self.menuSource)?.pct {
                 let drain = self.limitDrain()
                 for k in 1...12 {
                     let r = 1 - pow(1 - Double(k) / 12, 3)      // ease out
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, reveal: r)
+                    self.label.image = self.renderLabelImage(pct, drain: drain, reveal: r)
                     try? await Task.sleep(for: .milliseconds(33))
                 }
             }
@@ -190,6 +211,8 @@ final class Store: ObservableObject {
             if AppEnv.isBundled { Notifier.shared.notify(alert) }
         }
         snap = s
+        if popoverOpen { shown = s }
+        if label.running != s.running { label.running = s.running }
         updateLabelImage()
     }
 
@@ -209,7 +232,7 @@ final class Store: ObservableObject {
         }
         guard bucket != renderedPct else { return }
         renderedPct = bucket
-        labelImage = renderLabelImage(pct, drain: drain)
+        label.image = renderLabelImage(pct, drain: drain)
     }
 
     /// At the limit, the share of the wait until the reset that's still left: 1 when the app first
@@ -246,12 +269,12 @@ final class Store: ObservableObject {
                 guard let self, let pct = self.usage?.ring(self.menuSource)?.pct, let drain = self.limitDrain() else { continue }
                 for k in 1...14 {
                     let t = ease(Double(k) / 14)
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
+                    self.label.image = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
                     try? await Task.sleep(for: .milliseconds(33))
                 }
                 for k in 1...18 {
                     let t = ease(Double(k) / 18)
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (0, t))
+                    self.label.image = self.renderLabelImage(pct, drain: drain, trace: (0, t))
                     try? await Task.sleep(for: .milliseconds(33))
                 }
             }

@@ -4,15 +4,15 @@ import SwiftUI
 // MARK: - Menu-bar label
 
 struct MenuLabel: View {
-    @ObservedObject var store: Store
+    @ObservedObject var label: MenuLabelModel
     var body: some View {
         HStack(spacing: 3) {
-            if let img = store.labelImage {
+            if let img = label.image {
                 Image(nsImage: img)               // usage loader ring (colored)
             } else {
-                Image(systemName: store.runningCount > 0 ? "circle.fill" : "circle")
+                Image(systemName: label.running > 0 ? "circle.fill" : "circle")
                     .symbolRenderingMode(.multicolor)
-                    .foregroundStyle(store.runningCount > 0 ? Theme.runningModel : .secondary)
+                    .foregroundStyle(label.running > 0 ? Theme.runningModel : .secondary)
             }
             // Just the ring/circle in the menu bar — the running count lives in the popover header.
         }
@@ -256,7 +256,7 @@ struct PopoverView: View {
     private func columns(_ n: Int) -> Int { n <= 1 ? 1 : n <= 4 ? 2 : 3 }
 
     var body: some View {
-        let blocks = store.snap.blocks
+        let blocks = store.shown.blocks
         let cols = columns(blocks.count)
         let compact = blocks.count > 6
 
@@ -294,6 +294,7 @@ struct PopoverView: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
         .background(WindowFitter(size: contentSize))
         .background(WindowVisibilityReader(visible: $visible))
+        .onChange(of: visible) { _, v in store.popoverOpen = v }
         .environment(\.popoverVisible, visible)
     }
 }
@@ -397,12 +398,12 @@ struct HeaderView: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        let s = store.snap
+        let s = store.shown
         HStack(spacing: 12) {
             HStack(spacing: 6) {
-                PulseDot(color: store.runningCount > 0 ? Theme.runningModel : Theme.idle,
-                         active: store.runningCount > 0, size: 8)
-                Text("\(store.runningCount) running")
+                PulseDot(color: s.running > 0 ? Theme.runningModel : Theme.idle,
+                         active: s.running > 0, size: 8)
+                Text("\(s.running) running")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
                     .fixedSize()
             }
