@@ -37,15 +37,15 @@ Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on 
 - **Header** — running count, sub-agents running, and total tokens / cost *this session*.
 - **Cards** (1–3 column grid, one per active session):
   - **Context ring** — circular gauge, green→amber→orange→red as the window fills, % + token count.
-  - **State badge** — 🟢 running model · 🔧 running tool · 🟡 waiting prompt · ⚪️ idle (pulses while running).
+  - **State badge** - 🟢 running model · 🔧 running tool · 🟡 waiting prompt · ⚪️ idle · 🗜️ compacting · 🔴 failed (API error) (pulses while running; compacting and failed need the plugin).
   - repo name, git branch, model.
   - **Effort row** — ↑input ↓output tokens, cache, $cost, turns, tool-calls.
   - **Sub-agent chips** — a dot per running sub-agent + total.
 - **Footer** — icon buttons: Refresh, theme switch (Classic/Aurora), sound on/off, Quit.
 - **Right-click the menu-bar icon** — Launch at Login (bundled only), Quit.
 
-**Alerts** — when a session transitions running → waiting, a one-shot chime (always) + notification
-(bundled). Edge-triggered, so no repeated dinging.
+**Alerts** - when a session transitions running → waiting, needs permission, or failed (failed
+needs the plugin), a one-shot chime (always) + notification (bundled). Edge-triggered, so no repeated dinging.
 
 ---
 
@@ -84,7 +84,7 @@ Data sources, all verified:
 - **Transcripts** — `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity.
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
   non-conversational lines) + file age.
-- **Context %** — latest `usage` line, `input + cache_read + cache_creation` ÷ window (200k, or 1M).
+- **Context %** - latest real `usage` line (API-error placeholder lines skipped), or the post-compaction size right after a compaction (approximate until the next reply, since it leaves out the system prompt and tool definitions); `input + cache_read + cache_creation` ÷ window (200k, or 1M).
 - **Effort/cost** — incremental byte-offset parse (only newly appended bytes each poll), per-model
   pricing table.
 - **Sub-agents** — `<uuid>/subagents/agent-*.jsonl`; mtime < 10s ⇒ running.
@@ -96,10 +96,12 @@ Polling is adaptive: **1.5s** while anything runs, **5s** idle. Parsing runs off
 
 ## Fast triggers (optional plugin)
 
-For instant, precise status (permission prompts, turn/ tool transitions, subagent activity) install the
+For instant, precise status (permission prompts, turn/ tool transitions, subagent activity, API failures, compaction) install the
 bundled Claude Code plugin once:
 
     /plugin install ./plugin/claude-vitals
+
+Existing plugin installs pick the new events up with `/plugin update` (plugin 0.2.0); `install.sh` users re-run it. The hooks need Claude Code 2.1.89 or newer.
 
 At user scope it applies to every session in every repo. Its hooks push lifecycle events over a Unix
 domain socket (`~/.claude-vitals/vitals.sock`) to the running app, which uses them as the authoritative,

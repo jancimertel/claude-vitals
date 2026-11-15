@@ -91,6 +91,92 @@ struct Entry {
         let r8 = resolveState(heuristic: heuristic, isLive: true, liveConfirmed: false, hook: hook(.ended, "ended", at: 0, alive: false), transcriptMtime: now, now: now)
         check("hookLivenessOverridesProcessLiveness", r8.dot == .ended && r8.usedHook && !r8.live)
 
+        // Newer hook events: decoding and state mapping.
+        func dec(_ json: String) -> HookEvent? { try? JSONDecoder().decode(HookEvent.self, from: Data(json.utf8)) }
+        func st(_ d: Dot) -> HookStatus { HookStatus(dot: d, state: "x", toolName: "T", alive: true, at: now) }
+        func dot(_ d: Dot, _ e: HookEvent) -> Dot? { applyHookEvent(st(d), e, at: now)?.dot }
+
+        let nf = dec(#"{"hook_event_name":"StopFailure","session_id":"s","error":"rate_limit","agent_type":"general-purpose","permission_mode":"auto","effort":{"level":"high"},"source":"startup","trigger":"auto","notification_type":"idle_prompt","agent_id":"a1"}"#)
+        check("decodesNewFields", nf?.error == "rate_limit" && nf?.effortLevel == "high" && nf?.permission_mode == "auto"
+              && nf?.agent_type == "general-purpose" && nf?.agent_id == "a1" && nf?.source == "startup"
+              && nf?.trigger == "auto" && nf?.notification_type == "idle_prompt")
+        let old = dec(#"{"hook_event_name":"Stop","session_id":"s"}"#)
+        check("oldPayloadDecodes", old != nil && old?.source == nil && old?.trigger == nil && old?.error == nil
+              && old?.notification_type == nil && old?.agent_id == nil && old?.agent_type == nil
+              && old?.permission_mode == nil && old?.effortLevel == nil)
+        let odd = dec(#"{"hook_event_name":"StopFailure","session_id":"s","effort":"high","error":{"type":"x"}}"#)
+        check("oddFieldShapesStillDecode", odd != nil && odd?.effortLevel == nil && odd?.error == nil
+              && odd.flatMap { applyHookEvent(st(.runningModel), $0, at: now)?.state } == "failed: unknown")
+
+        let sf = applyHookEvent(st(.runningModel), HookEvent(event: "StopFailure", session_id: "s", error: "rate_limit"), at: now)
+        check("stopFailureGoesFailed", sf?.dot == .failed && sf?.state == "failed: rate limit" && sf?.toolName == nil)
+        check("subagentStopFailureIgnored", dot(.runningModel, HookEvent(event: "StopFailure", session_id: "s", error: "rate_limit", agent_id: "a1")) == .runningModel)
+        check("sessionStartCompactKeepsState", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "compact")) == .runningModel)
+        check("sessionStartStartupGoesWaiting", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "startup")) == .waiting)
+        check("sessionStartWithoutSourceGoesWaiting", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s")) == .waiting)
+        let pc = applyHookEvent(st(.runningTool), HookEvent(event: "PreCompact", session_id: "s", trigger: "auto"), at: now)
+        check("autoPreCompactWhileRunning", pc?.dot == .compacting && pc?.state == "compacting")
+        check("autoPreCompactWhileWaitingIgnored", dot(.waiting, HookEvent(event: "PreCompact", session_id: "s", trigger: "auto")) == .waiting)
+        check("manualPreCompactFromWaiting", dot(.waiting, HookEvent(event: "PreCompact", session_id: "s", trigger: "manual")) == .compacting)
+        check("postCompactAutoResumesRunning", dot(.compacting, HookEvent(event: "PostCompact", session_id: "s", trigger: "auto")) == .runningModel)
+        check("postCompactManualGoesWaiting", dot(.compacting, HookEvent(event: "PostCompact", session_id: "s", trigger: "manual")) == .waiting)
+        check("latePostCompactIgnored", dot(.runningModel, HookEvent(event: "PostCompact", session_id: "s", trigger: "manual")) == .runningModel)
+        check("toolFailureAndDenialGoRunningModel",
+              dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s")) == .runningModel
+              && dot(.waitingPermission, HookEvent(event: "PermissionDenied", session_id: "s")) == .runningModel)
+        check("interruptedToolGoesWaiting",
+              dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s", is_interrupt: true)) == .waiting
+              && dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s", is_interrupt: false)) == .runningModel
+              && dec(#"{"hook_event_name":"PostToolUseFailure","session_id":"s","is_interrupt":true}"#)?.is_interrupt == true)
+        let idleN = HookEvent(event: "Notification", session_id: "s", notification_type: "idle_prompt")
+        check("idlePromptOnlyWhileRunning", dot(.runningTool, idleN) == .waiting && dot(.failed, idleN) == .failed)
+        let permN = HookEvent(event: "Notification", session_id: "s", notification_type: "permission_prompt")
+        let pn = applyHookEvent(st(.runningTool), permN, at: now)
+        check("permissionPromptOnlyWhileRunning", pn?.dot == .waitingPermission && pn?.state == "needs permission" && dot(.waiting, permN) == .waiting)
+        let plainN = HookEvent(event: "Notification", session_id: "s")
+        check("untypedNotificationStillNoop", dot(.runningTool, plainN) == .runningTool && applyHookEvent(nil, plainN, at: now) == nil)
+
+        // failed is sticky while liveness is confirmed, and alerts.
+        let failedHook = hook(.failed, "failed", at: -120)
+        let rf1 = resolveState(heuristic: (.idle, "idle"), isLive: true, liveConfirmed: true, hook: failedHook, transcriptMtime: now.addingTimeInterval(-1), now: now)
+        check("failedSurvivesSupersessionWhileLivenessConfirmed", rf1.dot == .failed && rf1.usedHook)
+        let rf2 = resolveState(heuristic: (.idle, "idle"), isLive: true, liveConfirmed: false, hook: failedHook, transcriptMtime: now.addingTimeInterval(-1), now: now)
+        check("failedFallsBackWhenLivenessUnconfirmed", rf2.dot == .idle && !rf2.usedHook)
+        func card(_ d: Dot) -> Block {
+            Block(sessionId: "a", repo: "repo-a", title: "", cwd: "", branch: "", age: 0, dot: d, state: "",
+                  ctx: 0, ctxLimit: 200_000, ctxPct: 0, model: "?", inTok: 0, outTok: 0, cw: 0, cr: 0,
+                  cost: 0, turns: 0, tools: 0, subsTotal: 0, subsRunning: 0, live: true, pids: 1)
+        }
+        var t1 = TransitionTracker()
+        _ = t1.update([card(.runningModel)])
+        check("runningToFailedAlertsFailed", t1.update([card(.failed)]) == [Alert(repo: "repo-a", kind: .failed)])
+        var t2 = TransitionTracker()
+        check("autoCompactionIsSilent", [Dot.runningModel, .compacting, .runningModel].allSatisfy { t2.update([card($0)]).isEmpty })
+        var t3 = TransitionTracker()
+        _ = t3.update([card(.compacting)])
+        check("manualCompactFinishingChimes", t3.update([card(.waiting)]) == [Alert(repo: "repo-a", kind: .finished)])
+
+        // Ring and cost ignore synthetic API-error lines; the ring follows compaction.
+        let real = #"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_read_input_tokens":300000,"cache_creation_input_tokens":0}}}"#
+        let synth = #"{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","stop_reason":"stop_sequence","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#
+        let boundary = #"{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"manual","preTokens":300010,"postTokens":23336}}"#
+        let bareBoundary = #"{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto"}}"#
+        func ctxOf(_ ls: [String]) -> (ctx: Int, limit: Int, model: String) {
+            deriveContext(parseLines(Data(ls.joined(separator: "\n").utf8), dropFirstPartial: false))
+        }
+        let rs = ctxOf([real, synth])
+        check("ringSkipsSyntheticLine", rs.ctx == 300010 && rs.limit == 1_000_000 && rs.model == "claude-opus-4-8")
+        let rb = ctxOf([real, boundary])
+        check("ringUsesCompactBoundary", rb.ctx == 23336 && rb.limit == 1_000_000 && rb.model == "claude-opus-4-8")
+        check("ringIgnoresOlderBoundary", ctxOf([boundary, real]).ctx == 300010)
+        check("ringIgnoresBoundaryWithoutPostTokens", ctxOf([real, bareBoundary]).ctx == 300010)
+        let costFile = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jsonl")
+        let sonnet = #"{"type":"assistant","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":0}}}"#
+        try? Data((sonnet + "\n" + synth + "\n").utf8).write(to: costFile)
+        let eff = TranscriptParser().effort(path: costFile.path)
+        try? FileManager.default.removeItem(at: costFile)
+        check("costIgnoresSyntheticModel", eff.model == "claude-sonnet-4-6" && abs(eff.cost - 3.0) < 1e-9)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {

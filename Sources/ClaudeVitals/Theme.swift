@@ -104,6 +104,8 @@ enum Theme {
         case .runningTool:       return runningTool
         case .waiting:           return waiting
         case .waitingPermission: return waiting
+        case .compacting:        return accent
+        case .failed:            return danger
         case .idle:              return idle
         case .ended:             return idle
         }

@@ -187,14 +187,23 @@ func contextWindow(model: String, ctx: Int) -> Int {
 }
 
 func deriveContext(_ lines: [Line]) -> (ctx: Int, limit: Int, model: String) {
+    // A compaction newer than the last real usage line shrinks the context; usage only catches up
+    // on the next turn, so the boundary's postTokens is the better ring value until then.
+    var postTokens: Int?
     for l in lines.reversed() {
-        if let u = l.message?.usage {
-            let ctx = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
-            let model = l.message?.model ?? "?"
-            return (ctx, contextWindow(model: model, ctx: ctx), model)
+        if l.subtype == "compact_boundary" {
+            if postTokens == nil { postTokens = l.compactMetadata?.postTokens }
+            continue
         }
+        // Skip API-error placeholders: their zero usage and model "<synthetic>" would drop the ring
+        // to 0% and mislabel the model.
+        guard let msg = l.message, !msg.isSynthetic, let u = msg.usage else { continue }
+        let used = (u.input_tokens ?? 0) + (u.cache_read_input_tokens ?? 0) + (u.cache_creation_input_tokens ?? 0)
+        let model = msg.model ?? "?"
+        // Window comes from the pre-compaction usage so the 1M floor (ctx > 200k) survives a compact.
+        return (postTokens ?? used, contextWindow(model: model, ctx: used), model)
     }
-    return (0, 200_000, "?")
+    return (postTokens ?? 0, 200_000, "?")
 }
 
 func deriveSubagents(_ sessionFile: String) -> (total: Int, running: Int) {

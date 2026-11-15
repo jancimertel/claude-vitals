@@ -33,6 +33,9 @@ final class Notifier: Sendable {
         case .needsPermission:
             content.title = alert.repo
             content.body = "Agent needs permission to continue"
+        case .failed:
+            content.title = alert.repo
+            content.body = "Agent stopped on an API error"
         }
         content.sound = nil   // NSSound already chimes; avoid a double-ding
         let req = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)

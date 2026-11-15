@@ -49,7 +49,8 @@ If your Claude Code build lacks the `/plugin` command, register the hooks direct
 
 This copies the hook script to `~/.claude-vitals/emit.sh` and merges the hooks into
 `~/.claude/settings.json` (user scope, backup written to `settings.json.bak-vitals`). It is
-idempotent and preserves any other hooks you have.
+idempotent and preserves any other hooks you have. It needs Claude Code 2.1.89+ and refuses to
+run on older builds.
 
 ## 3. Verify
 
