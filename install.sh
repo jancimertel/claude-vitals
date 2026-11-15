@@ -10,11 +10,13 @@ set -euo pipefail
 
 REPO_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_EMIT="$REPO_DIR/plugin/claude-vitals/hooks/emit.sh"
+SRC_HOOKS="$REPO_DIR/plugin/claude-vitals/hooks/hooks.json"
 DEST_DIR="$HOME/.claude-vitals"
 DEST_EMIT="$DEST_DIR/emit.sh"
 SETTINGS="$HOME/.claude/settings.json"
 
 [ -f "$SRC_EMIT" ] || { echo "error: emit.sh not found at $SRC_EMIT" >&2; exit 1; }
+[ -f "$SRC_HOOKS" ] || { echo "error: hooks.json not found at $SRC_HOOKS" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "error: python3 required" >&2; exit 1; }
 
 # 1. Stage the hook script in a stable, repo-independent location.
@@ -27,16 +29,16 @@ mkdir -p "$(dirname "$SETTINGS")"
 [ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
 cp "$SETTINGS" "$SETTINGS.bak-vitals"
 
-python3 - "$SETTINGS" "$DEST_EMIT" <<'PY'
+python3 - "$SETTINGS" "$DEST_EMIT" "$SRC_HOOKS" <<'PY'
 import json, sys
-settings_path, emit = sys.argv[1], sys.argv[2]
+settings_path, emit, src_hooks = sys.argv[1], sys.argv[2], sys.argv[3]
 with open(settings_path) as f:
     cfg = json.load(f)
 
 cmd = {"type": "command", "command": emit, "async": True}
-TOOL_EVENTS  = ["PreToolUse", "PostToolUse", "PermissionRequest"]
-PLAIN_EVENTS = ["SessionStart", "SessionEnd", "UserPromptSubmit",
-                "Notification", "Stop", "SubagentStart", "SubagentStop"]
+# hooks.json is the single event list (plugin and installer stay in sync)
+with open(src_hooks) as f:
+    events = json.load(f)["hooks"]
 
 hooks = cfg.setdefault("hooks", {})
 def add(event, entry):
@@ -45,10 +47,9 @@ def add(event, entry):
     arr[:] = [e for e in arr if not any(h.get("command") == emit for h in e.get("hooks", []))]
     arr.append(entry)
 
-for ev in TOOL_EVENTS:
-    add(ev, {"matcher": "*", "hooks": [cmd]})
-for ev in PLAIN_EVENTS:
-    add(ev, {"hooks": [cmd]})
+for ev, entries in events.items():
+    m = entries[0].get("matcher")
+    add(ev, {"matcher": m, "hooks": [cmd]} if m else {"hooks": [cmd]})
 
 with open(settings_path, "w") as f:
     json.dump(cfg, f, indent=2)

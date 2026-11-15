@@ -96,10 +96,12 @@ Polling is adaptive: **1.5s** while anything runs, **5s** idle. Parsing runs off
 
 ## Fast triggers (optional plugin)
 
-For instant, precise status (permission prompts, turn/ tool transitions, subagent activity) install the
+For instant, precise status (permission prompts, turn/ tool transitions, subagent activity, API failures, compaction) install the
 bundled Claude Code plugin once:
 
     /plugin install ./plugin/claude-vitals
+
+Existing plugin installs pick the new events up with `/plugin update` (plugin 0.2.0); `install.sh` users re-run it.
 
 At user scope it applies to every session in every repo. Its hooks push lifecycle events over a Unix
 domain socket (`~/.claude-vitals/vitals.sock`) to the running app, which uses them as the authoritative,
