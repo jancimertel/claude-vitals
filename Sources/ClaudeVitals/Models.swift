@@ -12,18 +12,20 @@ struct Usage: Decodable {
 struct ContentBlock: Decodable { let type: String?; let name: String? }
 
 struct Message: Decodable {
+    let id: String?
     let role: String?
     let model: String?
     let stop_reason: String?
     let usage: Usage?
     let content: [ContentBlock]?
 
-    enum CodingKeys: String, CodingKey { case role, model, stop_reason, usage, content }
+    enum CodingKeys: String, CodingKey { case id, role, model, stop_reason, usage, content }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // Every field via `try?` so one variant line (e.g. content as String, not array) never
         // discards the whole line — we still keep type/stop_reason.
+        id = (try? c.decodeIfPresent(String.self, forKey: .id)) ?? nil
         role = (try? c.decodeIfPresent(String.self, forKey: .role)) ?? nil
         model = (try? c.decodeIfPresent(String.self, forKey: .model)) ?? nil
         stop_reason = (try? c.decodeIfPresent(String.self, forKey: .stop_reason)) ?? nil
@@ -99,6 +101,8 @@ struct Effort: Sendable {
     var inTok = 0, outTok = 0, cw = 0, cr = 0
     var turns = 0, tools = 0
     var model = "?"
+    // A set, not the last id: Claude Code replays whole messages hundreds of lines later.
+    var seen: Set<String> = []
     var cost = 0.0
     var mtime: Date = .distantPast   // change-detection signature with offset
     var parsed = false               // false until first read, so the cache gate is skipped initially

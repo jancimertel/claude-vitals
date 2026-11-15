@@ -170,12 +170,19 @@ struct Entry {
         check("ringUsesCompactBoundary", rb.ctx == 23336 && rb.limit == 1_000_000 && rb.model == "claude-opus-4-8")
         check("ringIgnoresOlderBoundary", ctxOf([boundary, real]).ctx == 300010)
         check("ringIgnoresBoundaryWithoutPostTokens", ctxOf([real, bareBoundary]).ctx == 300010)
-        let costFile = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jsonl")
+        func effortOf(_ ls: [String]) -> Effort {
+            let f = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jsonl")
+            try? Data((ls.joined(separator: "\n") + "\n").utf8).write(to: f)
+            defer { try? FileManager.default.removeItem(at: f) }
+            return TranscriptParser().effort(path: f.path)
+        }
         let sonnet = #"{"type":"assistant","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":0}}}"#
-        try? Data((sonnet + "\n" + synth + "\n").utf8).write(to: costFile)
-        let eff = TranscriptParser().effort(path: costFile.path)
-        try? FileManager.default.removeItem(at: costFile)
+        let eff = effortOf([sonnet, synth])
         check("costIgnoresSyntheticModel", eff.model == "claude-sonnet-4-6" && abs(eff.cost - 3.0) < 1e-9)
+        let m1 = #"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"end_turn","content":[{"type":"tool_use"}],"usage":{"output_tokens":1000000}}}"#
+        let m2 = #"{"type":"assistant","message":{"id":"m2","model":"claude-fable-5-2","stop_reason":"end_turn","usage":{"output_tokens":1000000}}}"#
+        let once = effortOf([m1, m1, m2, m1])   // split line, then a later replay
+        check("effortCountsEachMessageOnce", once.outTok == 2_000_000 && once.turns == 2 && once.tools == 3)
 
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)

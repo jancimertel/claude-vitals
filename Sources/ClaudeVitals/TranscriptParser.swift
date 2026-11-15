@@ -22,6 +22,8 @@ func tokenCost(model: String, inTok: Int, outTok: Int, cw: Int, cr: Int) -> Doub
 final class TranscriptParser {
     private var cache: [String: Effort] = [:]
 
+    func prune(keep: Set<String>) { cache = cache.filter { keep.contains($0.key) } }
+
     func effort(path: String) -> Effort {
         let size = fileSize(path)
         let m = mtime(path) ?? .distantPast
@@ -48,13 +50,15 @@ final class TranscriptParser {
                 for l in parseLines(complete, dropFirstPartial: false) {
                     guard l.type == "assistant", let msg = l.message else { continue }
                     if msg.isSynthetic { continue }   // else e.model becomes "<synthetic>" and the session reprices at the opus fallback
+                    if let model = msg.model { e.model = model }
+                    if let content = msg.content { e.tools += content.filter { $0.type == "tool_use" }.count }
+                    // Each split line repeats the full usage, so only the first line of an id may count.
+                    if let id = msg.id, !e.seen.insert(id).inserted { continue }
                     e.inTok += msg.usage?.input_tokens ?? 0
                     e.outTok += msg.usage?.output_tokens ?? 0
                     e.cw += msg.usage?.cache_creation_input_tokens ?? 0
                     e.cr += msg.usage?.cache_read_input_tokens ?? 0
-                    if let model = msg.model { e.model = model }
                     if msg.stop_reason == "end_turn" { e.turns += 1 }
-                    if let content = msg.content { e.tools += content.filter { $0.type == "tool_use" }.count }
                 }
                 e.offset += consumed
             }

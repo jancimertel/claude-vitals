@@ -382,6 +382,7 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
     }
 
     cache.parsed = cache.parsed.filter { candidates.contains($0.key) }   // drop sessions out of the window
+    parser.prune(keep: candidates)
 
     blocks.sort { (($0.live ? 0 : 1), $0.age) < (($1.live ? 0 : 1), $1.age) }
 
