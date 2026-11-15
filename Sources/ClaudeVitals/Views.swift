@@ -1,3 +1,4 @@
+import CoreText
 import SwiftUI
 
 // MARK: - Menu-bar label
@@ -47,24 +48,55 @@ struct LoaderRing: View {
     let pct: Double
     let theme: AppTheme
     var size: CGFloat = 18
+    /// At the limit: the share of the wait until the reset still left (1 → 0). The ring shows this
+    /// instead of the usage, emptying as the reset approaches.
+    var drain: Double? = nil
+    /// At the limit: how much of the heartbeat trace is drawn, left to right (the once-a-minute sweep).
+    var sweep: Double = 1
 
     private var clamped: Double { min(max(pct, 0), 100) }
+    private var fill: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
     var body: some View {
         let color = Theme.usage(pct, theme)
         let lineWidth = size * 0.13
         ZStack {
             // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
             // anything past the frame, which cut off the ring's outer edge in the menu bar.
-            Circle().inset(by: lineWidth / 2).trim(from: 0, to: clamped / 100)
+            Circle().inset(by: lineWidth / 2).trim(from: 0, to: fill)
                 .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
-            Text("\(Int(clamped.rounded()))")            // the % inside the ring
-                .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
-                .monospacedDigit().lineLimit(1).minimumScaleFactor(0.5)
-                .foregroundStyle(color)
-                .frame(width: size * 0.92)
+            if clamped >= 100 {
+                // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
+                // show a heartbeat trace instead.
+                Image(systemName: "waveform.path.ecg")
+                    .font(.system(size: size * 0.42, weight: .bold))
+                    .foregroundStyle(color)
+                    .mask {
+                        GeometryReader { g in Rectangle().frame(width: g.size.width * sweep) }
+                    }
+            } else {
+                let number = "\(Int(clamped.rounded()))"      // the % inside the ring
+                let ink = Self.inkBounds(number, size: size * 0.44)
+                Text(number)
+                    .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
+                    .lineLimit(1).fixedSize()
+                    .foregroundStyle(color)
+                    // Center the ink, not the line box: the box leaves digits ~0.4pt high (room for
+                    // descenders) and some, like "1", off to one side. Visible at menu-bar size.
+                    .alignmentGuide(HorizontalAlignment.center) { $0[.leading] + ink.midX }
+                    .alignmentGuide(VerticalAlignment.center) { $0[.firstTextBaseline] - ink.midY }
+            }
         }
         .frame(width: size, height: size)
+    }
+
+    /// The ink of `text` in the ring's font, relative to the text origin (x right, y up from the
+    /// baseline).
+    private static func inkBounds(_ text: String, size: CGFloat) -> CGRect {
+        let base = NSFont.systemFont(ofSize: size, weight: .bold)
+        let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
+        let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
+        return CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
     }
 }
 
@@ -77,6 +109,7 @@ struct UsageStripView: View {
         // TimelineView re-evaluates on open (and every 15s while open) so the "updated" age and reset
         // countdowns are current each time the popover appears — no API call, just the clock.
         TimelineView(.periodic(from: .now, by: 15)) { ctx in
+            let usage = usage.current(now: ctx.date)
             if narrow {
                 // Stack the windows so each bar gets the full width instead of being crammed on one line.
                 VStack(alignment: .leading, spacing: 6) {

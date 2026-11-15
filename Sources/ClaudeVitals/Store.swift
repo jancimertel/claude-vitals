@@ -42,14 +42,15 @@ final class Store: ObservableObject {
     private var tracker = TransitionTracker()
     private var loop: Task<Void, Never>?
     private var usageLoop: Task<Void, Never>?
+    private var sweepLoop: Task<Void, Never>?
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
     private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
-    init() { start(); startUsage(); startSocket() }
+    init() { start(); startUsage(); startSocket(); startSweep() }
 
-    isolated deinit { loop?.cancel(); usageLoop?.cancel(); socket?.stop() }
+    isolated deinit { loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); socket?.stop() }
 
     /// Hook events -> immediate targeted rebuild (no waiting for the poll tick).
     private func startSocket() {
@@ -92,7 +93,7 @@ final class Store: ObservableObject {
                 let switched = self.account.changed()
                 // Prime once on launch regardless of activity (one ~1-token call) so the menu bar shows
                 // real usage immediately; thereafter fetch only while active, at most once per 5 min.
-                if !primed || switched || recheck
+                if !primed || switched || recheck || self.limitResetPassed()
                     || (active && Date().timeIntervalSince(self.lastUsageFetch) >= 300) {
                     primed = true
                     // /login may store the new Keychain token after it rewrites ~/.claude.json, so the
@@ -135,21 +136,65 @@ final class Store: ObservableObject {
     /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
     private func updateLabelImage() {
         let pct = freshUsage?.menuPct
-        // Without usage data: -1 idle, -3 running. Aurora draws that dot itself, on its tile.
-        let bucket = pct.map { Int($0.rounded()) } ?? (runningCount > 0 ? -3 : -1)
+        let drain = limitDrain()
+        let bucket: Int
+        if let drain {
+            bucket = 1000 + Int((drain * 100).rounded())     // at the limit: 1000 + % of the wait left
+        } else {
+            // Without usage data: -1 idle, -3 running. Aurora draws that dot itself, on its tile.
+            bucket = pct.map { Int($0.rounded()) } ?? (runningCount > 0 ? -3 : -1)
+        }
         guard bucket != renderedPct else { return }
         renderedPct = bucket
-        labelImage = renderLabelImage(pct)
+        labelImage = renderLabelImage(pct, drain: drain)
+    }
+
+    /// At the limit, the share of the wait until the reset that's still left: 1 when the app first
+    /// sees 100%, 0 at the reset. Nil when not at the limit or the reset time is unknown. The start is
+    /// saved per reset time, so relaunching the app mid-wait doesn't refill the ring.
+    private func limitDrain(now: Date = Date()) -> Double? {
+        guard let u = freshUsage, let pct = u.menuPct, pct >= 100, let reset = u.menuReset else { return nil }
+        let d = UserDefaults.standard
+        if d.double(forKey: "limitReset") != reset.timeIntervalSince1970 {
+            d.set(reset.timeIntervalSince1970, forKey: "limitReset")
+            d.set(min(u.capturedAt, now).timeIntervalSince1970, forKey: "limitSince")
+        }
+        let since = Date(timeIntervalSince1970: d.double(forKey: "limitSince"))
+        let wait = reset.timeIntervalSince(since)
+        guard wait > 0 else { return 0 }
+        return min(max(reset.timeIntervalSince(now) / wait, 0), 1)
+    }
+
+    /// The limit's reset time has passed but the usage shown is from before it: fetch fresh numbers
+    /// instead of waiting for the next active-session fetch.
+    private func limitResetPassed() -> Bool {
+        guard let u = usage, (u.menuPct ?? 0) >= 100, let reset = u.menuReset else { return false }
+        return Date() >= reset && lastUsageFetch < reset
+    }
+
+    /// Once a minute while at the limit, draw the heartbeat trace in from left to right (~0.8s).
+    /// That's 12 renders a minute, and none when below the limit.
+    private func startSweep() {
+        sweepLoop = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard let self, let pct = self.usage?.menuPct, let drain = self.limitDrain() else { continue }
+                for k in 0...12 {
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, sweep: Double(k) / 12)
+                    try? await Task.sleep(for: .milliseconds(66))
+                }
+            }
+        }
     }
 
     /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (5h window),
     /// or with no usage data, Aurora's status dot. Nil means MenuLabel falls back to Classic's
     /// SF Symbol dot. Aurora puts either glyph on a navy tile, like the app icon.
-    private func renderLabelImage(_ pct: Double?) -> NSImage? {
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1) -> NSImage? {
         let glyph: AnyView
         if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
-            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22))
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, sweep: sweep))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {
@@ -167,7 +212,8 @@ final class Store: ObservableObject {
 
     /// Show the last fetched usage regardless of age (the strip displays how old it is). Fetching is
     /// gated on activity, so the value may be minutes old — that's surfaced as "updated Xm ago".
-    var freshUsage: RateUsage? { usage }
+    /// Windows past their reset show 0%. The poll loop re-renders the ring within 2–8s of a reset.
+    var freshUsage: RateUsage? { usage?.current() }
 
     /// Text beside the glyph: just the running count (the usage % now lives inside the ring).
     var menuText: String {
