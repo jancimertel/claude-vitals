@@ -21,7 +21,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .compactMap { button(in: $0.contentView) }.first
     }
 
-    /// Right-click (or control-click) on the menu-bar icon shows a menu with Quit instead of opening
+    @objc private func toggleLaunchAtLogin() { LaunchAtLogin.set(!LaunchAtLogin.isEnabled) }
+
+    /// Right-click (or control-click) on the menu-bar icon shows a menu (Launch at Login, Quit) instead of opening
     /// the popover. MenuBarExtra has no API for this, so a local event monitor catches the click
     /// before the status-bar button sees it.
     private func installContextMenu() {
@@ -30,6 +32,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard isContextClick, event.window?.className == "NSStatusBarWindow",
                   let button = Self.statusButton() else { return event }
             let menu = NSMenu()
+            if LaunchAtLogin.available {
+                let login = menu.addItem(withTitle: "Launch at Login", action: #selector(self.toggleLaunchAtLogin), keyEquivalent: "")
+                login.target = self
+                login.state = LaunchAtLogin.isEnabled ? .on : .off
+                menu.addItem(.separator())
+            }
             menu.addItem(withTitle: "Quit Claude Vitals", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
             NSMenu.popUpContextMenu(menu, with: event, for: button)
             return nil

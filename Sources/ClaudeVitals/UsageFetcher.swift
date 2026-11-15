@@ -115,7 +115,11 @@ enum RateLimitFetcher {
 func resetIn(_ date: Date?, now: Date = Date()) -> String? {
     guard let date else { return nil }
     let s = Int(date.timeIntervalSince(now))
-    if s <= 0 { return "now" }
+    return s <= 0 ? "now" : durStr(s)
+}
+
+/// "45m" / "2h13m" / "3d4h" for a duration in seconds.
+func durStr(_ s: Int) -> String {
     if s < 3600 { return "\(s / 60)m" }
     if s < 86400 { return "\(s / 3600)h\((s % 3600) / 60)m" }
     return "\(s / 86400)d\((s % 86400) / 3600)h"

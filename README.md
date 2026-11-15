@@ -41,8 +41,8 @@ Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on 
   - repo name, git branch, model.
   - **Effort row** — ↑input ↓output tokens, cache, $cost, turns, tool-calls.
   - **Sub-agent chips** — a dot per running sub-agent + total.
-  - **Click a card** → opens that repo in VS Code.
-- **Footer** — Refresh, Launch-at-login toggle (bundled only), Quit.
+- **Footer** — icon buttons: Refresh, theme switch (Classic/Aurora), sound on/off, Quit.
+- **Right-click the menu-bar icon** — Launch at Login (bundled only), Quit.
 
 **Alerts** — when a session transitions running → waiting, a one-shot chime (always) + notification
 (bundled). Edge-triggered, so no repeated dinging.
@@ -62,7 +62,10 @@ Shows the **real** 5-hour ("session") and 7-day ("weekly") utilization — the s
 - Polled every **2 min**; the glyph shows `max(5h, 7d)%`. On auth/network failure it keeps the last
   good value (Claude Code refreshes the token as you use it).
 
-The popover strip shows both windows as bars with reset countdowns (`5h 11% · 4h34m`).
+The popover strip shows each window as a caption (`5-HOUR  resets in 4h34m  11%`) over a bar; side
+by side they line up with the card columns, in one column they stack. A faint band ending in a mark
+shows how much of the window has passed: fill past the mark means usage is running ahead of time
+(hover the mark for the elapsed time). The footer shows when usage was last fetched.
 
 **Notes:** this uses your own subscription token against the API (unofficial — could change), and each
 check spends ~1 token of your quota. First run may show a one-time Keychain prompt — click
@@ -121,7 +124,7 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 | `TranscriptParser.swift` | Incremental effort cache (mtime+offset gated) + pricing. |
 | `Store.swift` | `@MainActor` observable store, adaptive poll loop, running→waiting edge detection. |
 | `Views.swift` | Popover, header, session card, context ring, pulse dot, footer, menu-bar label. |
-| `Integrations.swift` | Notifications, chime, VS Code launcher, launch-at-login (all bundle-guarded). |
+| `Integrations.swift` | Notifications, chime, launch-at-login (all bundle-guarded). |
 | `Theme.swift` | Dark color tokens. `AppEnv.swift` | bundle detection gating bundle-only APIs. |
 | `make_app.sh` | Wrap release binary into a signed `.app` (Info.plist, `LSUIElement`). |
 
