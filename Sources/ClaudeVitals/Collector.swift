@@ -296,6 +296,18 @@ func candidateFiles(active: Set<String>, extra: Set<String> = []) -> Set<String>
 /// answers, so on disk they look identical to a running tool but are actually "waiting prompt".
 let USER_PROMPT_TOOLS: Set<String> = ["AskUserQuestion", "ExitPlanMode"]
 
+/// When a transcript ends in lines without a timestamp, the time of the newest line that has one.
+/// Claude Code appends untimestamped bookkeeping (last-prompt, cost-state, bridge-session) to a
+/// finished transcript, sometimes minutes or hours after its last turn. Each append bumps the mtime,
+/// which made a long-finished session look like it was running for a few seconds and then fire a
+/// false "finished" alert. Nil when the last line has a timestamp (mtime is right) or no line in the
+/// tail has one (nothing better than mtime).
+func lastStamp(_ lines: [Line]) -> Date? {
+    guard let last = lines.last, last.timestamp == nil else { return nil }
+    guard let ts = lines.last(where: { $0.timestamp != nil })?.timestamp else { return nil }
+    return try? Date(ts, strategy: .iso8601.year().month().day().time(includingFractionalSeconds: true))
+}
+
 struct ParsedSession {
     let mtime: Date
     let size: Int
@@ -306,6 +318,7 @@ struct ParsedSession {
     let ctxLimit: Int
     let ctxModel: String
     let title: String        // Claude's auto chat title (from the last `ai-title` line), "" if none
+    let stampedAt: Date?     // see lastStamp: set only when the tail ends in untimestamped lines
 }
 
 /// Reused across refreshes inside the Collector actor so each tick only does work the filesystem
@@ -331,7 +344,8 @@ func parseSession(_ path: String, mtime m: Date, size: Int, cache: CollectorCach
     let p = ParsedSession(mtime: m, size: size,
                           lastType: lastConv?.type, lastStop: lastConv?.message?.stop_reason,
                           asksUser: asksUser,
-                          ctx: ctx, ctxLimit: limit, ctxModel: model, title: title)
+                          ctx: ctx, ctxLimit: limit, ctxModel: model, title: title,
+                          stampedAt: lastStamp(lines))
     cache.parsed[path] = p
     return p
 }
@@ -350,8 +364,9 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
 
     for f in candidates {
         guard let m = mtime(f) else { continue }
-        let age = now.timeIntervalSince(m)
         let ps = parseSession(f, mtime: m, size: fileSize(f), cache: cache)
+        // A bookkeeping append is not activity: age from the last timestamped line instead (lastStamp).
+        let age = now.timeIntervalSince(ps.stampedAt.map { min($0, m) } ?? m)
         let (headCwd, branch) = headMetaCached(f, cache: cache)
         let (subsTotal, subsRunning) = deriveSubagents(f)
         let e = parser.effort(path: f)

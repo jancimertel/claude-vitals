@@ -208,6 +208,15 @@ struct Entry {
         let oddUsage = effortOf([#"{"type":"assistant","message":{"id":"o","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"speed":1,"cache_creation":"x"}}}"#])
         check("usageToleratesOddShapes", oddUsage.inTok == 1_000_000 && near(oddUsage.cost, 4))
 
+        // Untimestamped bookkeeping appended after a finished turn is not activity.
+        func linesOf(_ ls: [String]) -> [Line] { parseLines(Data(ls.joined(separator: "\n").utf8), dropFirstPartial: false) }
+        let turnEnd = #"{"type":"assistant","timestamp":"2026-11-15T10:00:00.000Z","message":{"stop_reason":"end_turn"}}"#
+        let costState = #"{"type":"cost-state"}"#
+        let lastPrompt = #"{"type":"last-prompt"}"#
+        check("stampAfterUnstampedTail", lastStamp(linesOf([turnEnd, lastPrompt, costState])) == Date(timeIntervalSince1970: 1_794_736_800))
+        check("noStampWhenLastLineStamped", lastStamp(linesOf([costState, turnEnd])) == nil)
+        check("noStampWithoutAnyStamp", lastStamp(linesOf([lastPrompt, costState])) == nil)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {
