@@ -179,10 +179,12 @@ struct Entry {
         let sonnet = #"{"type":"assistant","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":0}}}"#
         let eff = effortOf([sonnet, synth])
         check("costIgnoresSyntheticModel", eff.model == "claude-sonnet-4-6" && abs(eff.cost - 3.0) < 1e-9)
-        let m1 = #"{"type":"assistant","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"end_turn","content":[{"type":"tool_use"}],"usage":{"output_tokens":1000000}}}"#
+        func m1(_ uuid: String) -> String {
+            #"{"type":"assistant","uuid":"\#(uuid)","message":{"id":"m1","model":"claude-opus-5-5","stop_reason":"end_turn","content":[{"type":"tool_use"}],"usage":{"output_tokens":1000000}}}"#
+        }
         let m2 = #"{"type":"assistant","message":{"id":"m2","model":"claude-fable-5-2","stop_reason":"end_turn","usage":{"output_tokens":1000000}}}"#
-        let once = effortOf([m1, m1, m2, m1])   // split line, then a later replay
-        check("effortCountsEachMessageOnce", once.outTok == 2_000_000 && once.turns == 2 && once.tools == 3)
+        let once = effortOf([m1("a"), m1("b"), m2, m1("a")])   // two split lines (a tool each), then a replay of the first
+        check("effortCountsEachMessageOnce", once.outTok == 2_000_000 && once.turns == 2 && once.tools == 2)
         func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
         check("costPricesEachMessageAtItsModel", near(once.cost, 60) && !once.estimated)      // $20 opus-5-5 + $40 fable-5-2
         let split = #"{"type":"assistant","message":{"id":"c1","model":"claude-opus-5-5","usage":{"cache_creation_input_tokens":2000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000,"ephemeral_1h_input_tokens":1000000}}}}"#

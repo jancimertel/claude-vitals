@@ -75,6 +75,7 @@ struct CompactMetadata: Decodable {
 
 struct Line: Decodable {
     let type: String?
+    let uuid: String?
     let cwd: String?
     let gitBranch: String?
     let timestamp: String?
@@ -83,11 +84,12 @@ struct Line: Decodable {
     let subtype: String?   // e.g. "compact_boundary" on `type: "system"` lines
     let compactMetadata: CompactMetadata?
 
-    enum CodingKeys: String, CodingKey { case type, cwd, gitBranch, timestamp, message, aiTitle, subtype, compactMetadata }
+    enum CodingKeys: String, CodingKey { case type, uuid, cwd, gitBranch, timestamp, message, aiTitle, subtype, compactMetadata }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         type = (try? c.decodeIfPresent(String.self, forKey: .type)) ?? nil
+        uuid = (try? c.decodeIfPresent(String.self, forKey: .uuid)) ?? nil
         cwd = (try? c.decodeIfPresent(String.self, forKey: .cwd)) ?? nil
         gitBranch = (try? c.decodeIfPresent(String.self, forKey: .gitBranch)) ?? nil
         timestamp = (try? c.decodeIfPresent(String.self, forKey: .timestamp)) ?? nil
@@ -124,8 +126,9 @@ struct Effort: Sendable {
     var inTok = 0, outTok = 0, cw = 0, cr = 0
     var turns = 0, tools = 0
     var model = "?"
-    // A set, not the last id: Claude Code replays whole messages hundreds of lines later.
-    var seen: Set<String> = []
+    // Sets, not the last value: Claude Code replays whole lines hundreds of lines later.
+    var seen: Set<String> = []       // message ids
+    var seenLines: Set<String> = []  // line uuids
     var cost = 0.0
     var estimated = false            // some message used a model missing from RATES
     var mtime: Date = .distantPast   // change-detection signature with offset

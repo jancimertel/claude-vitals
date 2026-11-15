@@ -27,12 +27,13 @@ func canonicalModel(_ model: String) -> String {
 
 /// Prices one API message. An unknown model is priced at Opus 5.5 rates and flagged, so the UI can show `~`.
 func messageCost(model: String, usage u: Usage) -> (usd: Double, estimated: Bool) {
-    let known = RATES[canonicalModel(model)]
+    let id = canonicalModel(model)
+    let known = RATES[id]
     let r = known ?? RATES["claude-opus-5-5"]!
     let inTok = u.input_tokens ?? 0, cr = u.cache_read_input_tokens ?? 0, cw = u.cache_creation_input_tokens ?? 0
     let w1h = min(u.cache_creation?.ephemeral_1h_input_tokens ?? 0, cw)
     var m = 1.0
-    if canonicalModel(model) == "claude-haiku-5-5", inTok + cr + cw > 100_000 { m *= 5 }   // long-prompt tier
+    if id == "claude-haiku-5-5", inTok + cr + cw > 100_000 { m *= 5 }   // long-prompt tier
     if u.speed == "fast" { m *= 2 }                                                          // fast mode
     if u.inference_geo == "us" { m *= 1.1 }                                                  // US-only inference
     let usd = (Double(inTok) * r.input + Double(u.output_tokens ?? 0) * r.output + Double(cr) * r.read
@@ -72,10 +73,12 @@ final class TranscriptParser {
                 let complete = Data(data.prefix(consumed))
                 for l in parseLines(complete, dropFirstPartial: false) {
                     guard l.type == "assistant", let msg = l.message else { continue }
-                    if msg.isSynthetic { continue }   // else e.model becomes "<synthetic>" and the session reprices at the opus fallback
+                    if msg.isSynthetic { continue }   // else e.model becomes "<synthetic>" and the card shows it as an estimate
+                    if let u = l.uuid, !e.seenLines.insert(u).inserted { continue }   // a replayed line counts nothing twice
                     if let model = msg.model { e.model = model }
                     if let content = msg.content { e.tools += content.filter { $0.type == "tool_use" }.count }
-                    // Each split line repeats the full usage, so only the first line of an id may count.
+                    // In main transcripts each split line repeats the message's full usage, so only the first line
+                    // of an id counts. Sub-agent transcripts write a partial usage first: take the last if they are ever priced.
                     if let id = msg.id, !e.seen.insert(id).inserted { continue }
                     e.inTok += msg.usage?.input_tokens ?? 0
                     e.outTok += msg.usage?.output_tokens ?? 0
