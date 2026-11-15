@@ -38,19 +38,79 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Which window the menu-bar ring shows below the limit. Set from the right-click menu.
+    @Published var menuSource = MenuSource.saved {
+        didSet {
+            MenuSource.saved = menuSource
+            renderedPct = -2                  // the new window can round to the same %: force a re-render
+            updateLabelImage()
+        }
+    }
+
     private let collector = Collector()
     private var tracker = TransitionTracker()
     private var loop: Task<Void, Never>?
     private var usageLoop: Task<Void, Never>?
     private var sweepLoop: Task<Void, Never>?
+    private var loadingLoop: Task<Void, Never>?   // set until the menu-bar intro hands off
+    private var loadingDone = false               // the first usage fetch returned
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
     private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
-    init() { start(); startUsage(); startSocket(); startSweep() }
+    init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
 
-    isolated deinit { loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); socket?.stop() }
+    isolated deinit {
+        loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); loadingLoop?.cancel(); socket?.stop()
+    }
+
+    /// The menu-bar intro, until the first usage fetch returns: a gray dot grows and opens into the
+    /// ring's outline (LoadingDot). Then the outline unwinds to the reading, takes its color, and the
+    /// number fades in. ~30 renders a second while it moves, none while the full ring waits.
+    private func startLoading() {
+        loadingLoop = Task { [weak self] in
+            let start = ContinuousClock.now
+            let dotTime = 0.3                                // the dot's own beat before it opens
+            var grow = 0.0
+            while !Task.isCancelled {
+                guard let self else { return }
+                if self.loadingDone { break }
+                if grow < 1 {
+                    let t = (ContinuousClock.now - start) / .seconds(1)
+                    // The ring then eases toward full size, so it never visibly stops to wait for
+                    // the fetch: 90% at ~1.2s, full (snapped from 99%) at ~2.1s.
+                    grow = t < dotTime ? 0.5 * (1 - pow(1 - t / dotTime, 2))
+                                       : 0.5 + 0.5 * (1 - exp(-(t - dotTime) / 0.4))
+                    if grow > 0.995 { grow = 1 }
+                    self.labelImage = self.renderLabelImage(nil, loading: grow)
+                }
+                try? await Task.sleep(for: .milliseconds(grow < 1 ? 33 : 100))   // grown: just wait
+            }
+            guard let self else { return }
+            // A fast fetch can land mid-growth: finish it quickly first.
+            while grow < 1 {
+                grow = min(grow + 0.15, 1)
+                self.labelImage = self.renderLabelImage(nil, loading: grow)
+                try? await Task.sleep(for: .milliseconds(33))
+            }
+            if let pct = self.freshUsage?.ring(self.menuSource)?.pct {
+                let drain = self.limitDrain()
+                for k in 1...12 {
+                    let r = 1 - pow(1 - Double(k) / 12, 3)      // ease out
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, reveal: r)
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+            }
+            // No data (the fetch failed): cut straight to the no-usage glyph.
+            self.loadingLoop = nil
+            self.renderedPct = -2                   // the intro drew over the image: render the real one
+            self.updateLabelImage()
+        }
+    }
+
+    /// The first fetch returned: the intro finishes and hands over the image (see startLoading).
+    private func stopLoading() { loadingDone = true }
 
     /// Hook events -> immediate targeted rebuild (no waiting for the poll tick).
     private func startSocket() {
@@ -100,8 +160,10 @@ final class Store: ObservableObject {
                     // first fetch can still use the old account's token. Fetch once more next tick.
                     recheck = switched
                     self.lastUsageFetch = Date()
-                    if let u = await RateLimitFetcher.fetch() {
-                        self.usage = u
+                    let fetched = await RateLimitFetcher.fetch()
+                    if let u = fetched { self.usage = u }
+                    self.stopLoading()
+                    if fetched != nil {
                         self.updateLabelImage()
                     } else if switched {
                         // Never keep showing the previous account's numbers as if they were current.
@@ -135,7 +197,8 @@ final class Store: ObservableObject {
     /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
     /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
     private func updateLabelImage() {
-        let pct = freshUsage?.menuPct
+        guard loadingLoop == nil else { return }       // the loading animation owns the image
+        let pct = freshUsage?.ring(menuSource)?.pct
         let drain = limitDrain()
         let bucket: Int
         if let drain {
@@ -153,7 +216,7 @@ final class Store: ObservableObject {
     /// sees 100%, 0 at the reset. Nil when not at the limit or the reset time is unknown. The start is
     /// saved per reset time, so relaunching the app mid-wait doesn't refill the ring.
     private func limitDrain(now: Date = Date()) -> Double? {
-        guard let u = freshUsage, let pct = u.menuPct, pct >= 100, let reset = u.menuReset else { return nil }
+        guard let u = freshUsage, let w = u.ring(menuSource), w.pct >= 100, let reset = w.reset else { return nil }
         let d = UserDefaults.standard
         if d.double(forKey: "limitReset") != reset.timeIntervalSince1970 {
             d.set(reset.timeIntervalSince1970, forKey: "limitReset")
@@ -168,33 +231,49 @@ final class Store: ObservableObject {
     /// The limit's reset time has passed but the usage shown is from before it: fetch fresh numbers
     /// instead of waiting for the next active-session fetch.
     private func limitResetPassed() -> Bool {
-        guard let u = usage, (u.menuPct ?? 0) >= 100, let reset = u.menuReset else { return false }
+        guard let w = usage?.ring(menuSource), w.pct >= 100, let reset = w.reset else { return false }
         return Date() >= reset && lastUsageFetch < reset
     }
 
-    /// Once a minute while at the limit, draw the heartbeat trace in from left to right (~0.8s).
-    /// That's 12 renders a minute, and none when below the limit.
+    /// Once a minute while at the limit, a heartbeat: the trace erases from the left (~0.45s), then
+    /// draws back in from the left (~0.6s), like a monitor's line. That's 32 renders a minute, and
+    /// none when below the limit.
     private func startSweep() {
         sweepLoop = Task { [weak self] in
+            func ease(_ x: Double) -> Double { x < 0.5 ? 2 * x * x : 1 - pow(-2 * x + 2, 2) / 2 }
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(60))
-                guard let self, let pct = self.usage?.menuPct, let drain = self.limitDrain() else { continue }
-                for k in 0...12 {
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, sweep: Double(k) / 12)
-                    try? await Task.sleep(for: .milliseconds(66))
+                guard let self, let pct = self.usage?.ring(self.menuSource)?.pct, let drain = self.limitDrain() else { continue }
+                for k in 1...14 {
+                    let t = ease(Double(k) / 14)
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
+                    try? await Task.sleep(for: .milliseconds(33))
+                }
+                for k in 1...18 {
+                    let t = ease(Double(k) / 18)
+                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (0, t))
+                    try? await Task.sleep(for: .milliseconds(33))
                 }
             }
         }
     }
 
-    /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (5h window),
-    /// or with no usage data, Aurora's status dot. Nil means MenuLabel falls back to Classic's
-    /// SF Symbol dot. Aurora puts either glyph on a navy tile, like the app icon.
-    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, sweep: Double = 1) -> NSImage? {
+    /// Render the menu-bar glyph to a (non-template, colored) image: the usage loader (the window
+    /// `ring(menuSource)` picks), or with no usage data, Aurora's status dot. Nil means MenuLabel
+    /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
+    /// icon. `loading` draws the intro's LoadingDot instead, in both themes; `reveal` is the intro's
+    /// hand-off to the ring.
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil,
+                                  trace: (from: Double, to: Double) = (0, 1),
+                                  loading: Double? = nil,
+                                  reveal: Double = 1) -> NSImage? {
         let glyph: AnyView
-        if let pct {
+        if let loading {
+            glyph = AnyView(LoadingDot(grow: loading, theme: theme, size: 22))
+        } else if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
-            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, sweep: sweep))
+            glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, trace: trace,
+                                       reveal: reveal))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {

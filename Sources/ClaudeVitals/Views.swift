@@ -42,6 +42,27 @@ struct StatusDot: View {
     }
 }
 
+/// The menu-bar intro until the first usage fetch returns: a dot that opens into a ring at
+/// LoaderRing's stroke and widens to its size, so the first reading takes over in place. Neutral
+/// gray: there's no reading yet, so no usage color.
+struct LoadingDot: View {
+    /// First half: the solid dot grows to two strokes wide, the widest it can be at the ring's
+    /// stroke. Second half: the ring widens to full size.
+    let grow: Double                                   // 0 → 1
+    let theme: AppTheme
+    var size: CGFloat = 18
+
+    var body: some View {
+        let lineWidth = size * 0.13                    // LoaderRing's stroke
+        let dot = 2 * lineWidth
+        let outer = grow < 0.5 ? 2 + (dot - 2) * grow / 0.5 : dot + (size - dot) * (grow - 0.5) / 0.5
+        let w = min(outer / 2, lineWidth)
+        Circle().inset(by: w / 2).stroke(Theme.loading(theme), lineWidth: w)
+            .frame(width: outer, height: outer)
+            .frame(width: size, height: size)
+    }
+}
+
 /// Circular usage gauge used both in the menu bar (rendered to an image) and the popover.
 /// Colored per `theme` (see Theme.usage).
 struct LoaderRing: View {
@@ -51,29 +72,38 @@ struct LoaderRing: View {
     /// At the limit: the share of the wait until the reset still left (1 → 0). The ring shows this
     /// instead of the usage, emptying as the reset approaches.
     var drain: Double? = nil
-    /// At the limit: how much of the heartbeat trace is drawn, left to right (the once-a-minute sweep).
-    var sweep: Double = 1
+    /// At the limit: the part of the heartbeat trace drawn, as shares of its length. The
+    /// once-a-minute beat erases it from the left, then draws it back in from the left.
+    var trace: (from: Double, to: Double) = (0, 1)
+    /// The menu-bar intro's hand-off (0 → 1): the full outline unwinds to the reading, its gray
+    /// turns to the reading's color, and the number fades in.
+    var reveal: Double = 1
 
     private var clamped: Double { min(max(pct, 0), 100) }
-    private var fill: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
+    private var reading: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
+    private var fill: Double { 1 - (1 - reading) * reveal }
     var body: some View {
         let color = Theme.usage(pct, theme)
         let lineWidth = size * 0.13
         ZStack {
             // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
             // anything past the frame, which cut off the ring's outer edge in the menu bar.
-            Circle().inset(by: lineWidth / 2).trim(from: 0, to: fill)
-                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
-                .rotationEffect(.degrees(-90))
+            let arc = Circle().inset(by: lineWidth / 2).trim(from: 0, to: fill)
+            let stroke = StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+            ZStack {
+                // Color.mix needs macOS 15: fade the color in over the intro's gray instead.
+                if reveal < 1 { arc.stroke(Theme.loading(theme), style: stroke) }
+                arc.stroke(color, style: stroke).opacity(reveal)
+            }
+            .rotationEffect(.degrees(-90))
             if clamped >= 100 {
                 // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
                 // show a heartbeat trace instead.
-                Image(systemName: "waveform.path.ecg")
-                    .font(.system(size: size * 0.42, weight: .bold))
-                    .foregroundStyle(color)
-                    .mask {
-                        GeometryReader { g in Rectangle().frame(width: g.size.width * sweep) }
-                    }
+                HeartbeatTrace().trim(from: trace.from, to: trace.to)
+                    .stroke(color, style: StrokeStyle(lineWidth: size * 0.05, lineCap: .round,
+                                                      lineJoin: .round))
+                    .frame(width: size * 0.39, height: size * 0.40)
+                    .opacity(reveal)
             } else {
                 let number = "\(Int(clamped.rounded()))"      // the % inside the ring
                 let ink = Self.inkBounds(number, size: size * 0.44)
@@ -81,6 +111,7 @@ struct LoaderRing: View {
                     .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
                     .lineLimit(1).fixedSize()
                     .foregroundStyle(color)
+                    .opacity(reveal)
                     // Center the ink, not the line box: the box leaves digits ~0.4pt high (room for
                     // descenders) and some, like "1", off to one side. Visible at menu-bar size.
                     .alignmentGuide(HorizontalAlignment.center) { $0[.leading] + ink.midX }
@@ -97,6 +128,22 @@ struct LoaderRing: View {
         let font = base.fontDescriptor.withDesign(.rounded).flatMap { NSFont(descriptor: $0, size: size) } ?? base
         let line = CTLineCreateWithAttributedString(NSAttributedString(string: text, attributes: [.font: font]))
         return CTLineGetBoundsWithOptions(line, .useGlyphPathBounds)
+    }
+}
+
+/// The heartbeat inside the ring at the limit: SF Symbols' waveform.path.ecg, redrawn as one path
+/// so it can be drawn and erased along its length (a symbol can only be masked, which cut the
+/// stroke with a straight edge).
+struct HeartbeatTrace: Shape {
+    func path(in rect: CGRect) -> Path {
+        // The symbol's centerline, as shares of the rect (y down): baseline, spike up, dip below
+        // the baseline, a smaller peak, back to the baseline.
+        let points: [(CGFloat, CGFloat)] = [
+            (0, 0.54), (0.255, 0.54), (0.375, 0), (0.543, 1), (0.717, 0.24), (0.8, 0.54), (1, 0.54),
+        ]
+        var p = Path()
+        p.addLines(points.map { CGPoint(x: rect.minX + $0.0 * rect.width, y: rect.minY + $0.1 * rect.height) })
+        return p
     }
 }
 
