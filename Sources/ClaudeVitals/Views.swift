@@ -419,8 +419,9 @@ struct HeaderView: View {
             stat(human(s.totalIn + s.totalOut) + " tok")
                 .help("Tokens in the sessions shown: \(s.totalIn.formatted()) in + \(s.totalOut.formatted()) out, "
                       + "plus \((s.totalCw + s.totalCr).formatted()) cache")
-            stat(String(format: "$%.2f", s.totalCost))
-                .help("What the sessions shown would cost at API list prices (not billed on a subscription)")
+            stat(usd(s.totalCost, estimated: s.costEstimated))
+                .help("What the sessions shown would cost at API list prices (not billed on a subscription)"
+                      + (s.costEstimated ? ". ~ = a model missing from the price table, priced at Opus 5.5 rates" : ""))
         }
         .padding(.horizontal, 14)
         .frame(height: 44)
@@ -493,9 +494,10 @@ struct SessionCardView: View {
             metric("arrow.triangle.2.circlepath", human(block.cw + block.cr))
                 .help("Cache tokens: \(block.cw.formatted()) written, \(block.cr.formatted()) read")
             Spacer(minLength: 0)
-            Text(String(format: "$%.2f", block.cost))
+            Text(usd(block.cost, estimated: block.estimated))
                 .font(.system(size: 10, weight: .semibold)).monospacedDigit().foregroundStyle(Theme.textPrimary)
-                .help("Cost at API list prices (not billed on a subscription)")
+                .help("Cost at API list prices (not billed on a subscription)"
+                      + (block.estimated ? ". ~ = a model missing from the price table, priced at Opus 5.5 rates" : ""))
             Text("\(block.turns)t").font(.system(size: 10)).monospacedDigit().foregroundStyle(Theme.textTertiary)
                 .help("Turns: replies where Claude finished and handed back to you")
             Text("\(block.tools)⚙").font(.system(size: 10)).monospacedDigit().foregroundStyle(Theme.textTertiary)
