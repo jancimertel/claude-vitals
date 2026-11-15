@@ -31,7 +31,7 @@ final class SessionRegistryTests: XCTestCase {
 
     func testDecodesKnownFieldsAndIgnoresUnknown() {
         write("42.json", #"{"pid":42,"sessionId":"s1","cwd":"/r","startedAt":1000,"status":"busy","future":{"x":1}}"#)
-        XCTAssertEqual(readRegistry(dir: tmp), [RegistryEntry(pid: 42, sessionId: "s1", cwd: "/r", startedAt: 1000)])
+        XCTAssertEqual(readRegistry(dir: tmp), [RegistryEntry(pid: 42, sessionId: "s1", cwd: "/r", startedAt: 1000, status: "busy")])
     }
 
     func testSkipsBrokenEntriesAndNonJsonFiles() {
