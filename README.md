@@ -85,8 +85,8 @@ Data sources, all verified:
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
   non-conversational lines) + file age.
 - **Context %** - latest real `usage` line (API-error placeholder lines skipped), or the post-compaction size right after a compaction (approximate until the next reply, since it leaves out the system prompt and tool definitions); `input + cache_read + cache_creation` ÷ window (200k, or 1M).
-- **Effort/cost** — incremental byte-offset parse (only newly appended bytes each poll), per-model
-  pricing table.
+- **Effort/cost** - incremental byte-offset parse (only newly appended bytes each poll), each API
+  message priced once at its own model's rate, 1-hour cache writes included.
 - **Sub-agents** — `<uuid>/subagents/agent-*.jsonl`; mtime < 10s ⇒ running.
 
 Polling is adaptive: **1.5s** while anything runs, **5s** idle. Parsing runs off the main thread
@@ -137,6 +137,7 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 - **Personal use needs no signing/account** — `make_app.sh` ad-hoc signs (`codesign -s -`), which is
   enough for notifications and launch-at-login on your own machine. Sharing with others would need
   notarization.
-- **Cost is a public-rate estimate** (sums per-message `usage`), good for relative comparison.
+- **Cost is an API list-price estimate** (not what a subscription is billed). A `~` marks a model
+  missing from the price table, and sub-agent transcripts are not included yet.
 - Built quality-checked: a multi-lens adversarial review pass fixed cache-invalidation,
   liveness-detection, animation-restart, and state-detection edge cases.

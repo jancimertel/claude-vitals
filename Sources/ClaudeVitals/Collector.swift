@@ -375,7 +375,7 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
             dot: resolved.dot, state: resolved.state,
             ctx: ps.ctx, ctxLimit: ps.ctxLimit, ctxPct: ps.ctxLimit > 0 ? Double(ps.ctx) / Double(ps.ctxLimit) * 100 : 0,
             model: ps.ctxModel == "?" ? e.model : ps.ctxModel,
-            inTok: e.inTok, outTok: e.outTok, cw: e.cw, cr: e.cr, cost: e.cost,
+            inTok: e.inTok, outTok: e.outTok, cw: e.cw, cr: e.cr, cost: e.cost, estimated: e.estimated,
             turns: e.turns, tools: e.tools,
             subsTotal: subsTotal, subsRunning: subsRunning,
             live: resolved.live, pids: liveMatch?.value ?? 0))
@@ -395,6 +395,7 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
         totalCw: blocks.reduce(0) { $0 + $1.cw },
         totalCr: blocks.reduce(0) { $0 + $1.cr },
         totalCost: blocks.reduce(0) { $0 + $1.cost },
+        costEstimated: blocks.contains { $0.estimated },
         hookDriven: anyHookDriven)
 }
 
@@ -435,6 +436,8 @@ func human(_ n: Int) -> String {
     if n >= 1_000 { return String(format: "%.0fk", Double(n) / 1_000) }
     return String(n)
 }
+
+func usd(_ v: Double, estimated: Bool) -> String { (estimated ? "~" : "") + String(format: "$%.2f", v) }
 
 func ageStr(_ s: Int) -> String {
     if s < 60 { return "\(s)s ago" }

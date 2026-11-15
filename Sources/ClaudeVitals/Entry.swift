@@ -31,7 +31,7 @@ struct Entry {
             let state = b.state.padding(toLength: 14, withPad: " ", startingAt: 0)
             print("\(b.dot.glyph) \(repo) \(state) "
                 + "ctx \(String(format: "%5.1f", b.ctxPct))%  "
-                + "\(human(b.inTok + b.outTok)) tok  $\(String(format: "%.2f", b.cost))  "
+                + "\(human(b.inTok + b.outTok)) tok  \(usd(b.cost, estimated: b.estimated))  "
                 + "\(b.turns)t/\(b.tools)tools  sub \(b.subsRunning)/\(b.subsTotal)  "
                 + "\(b.branch)  \(b.age)s"
                 + (b.title.isEmpty ? "" : "  \"\(b.title)\""))
@@ -145,7 +145,7 @@ struct Entry {
         func card(_ d: Dot) -> Block {
             Block(sessionId: "a", repo: "repo-a", title: "", cwd: "", branch: "", age: 0, dot: d, state: "",
                   ctx: 0, ctxLimit: 200_000, ctxPct: 0, model: "?", inTok: 0, outTok: 0, cw: 0, cr: 0,
-                  cost: 0, turns: 0, tools: 0, subsTotal: 0, subsRunning: 0, live: true, pids: 1)
+                  cost: 0, estimated: false, turns: 0, tools: 0, subsTotal: 0, subsRunning: 0, live: true, pids: 1)
         }
         var t1 = TransitionTracker()
         _ = t1.update([card(.runningModel)])
@@ -183,6 +183,28 @@ struct Entry {
         let m2 = #"{"type":"assistant","message":{"id":"m2","model":"claude-fable-5-2","stop_reason":"end_turn","usage":{"output_tokens":1000000}}}"#
         let once = effortOf([m1, m1, m2, m1])   // split line, then a later replay
         check("effortCountsEachMessageOnce", once.outTok == 2_000_000 && once.turns == 2 && once.tools == 3)
+        func near(_ a: Double, _ b: Double) -> Bool { abs(a - b) < 1e-9 }
+        check("costPricesEachMessageAtItsModel", near(once.cost, 60) && !once.estimated)      // $20 opus-5-5 + $40 fable-5-2
+        let split = #"{"type":"assistant","message":{"id":"c1","model":"claude-opus-5-5","usage":{"cache_creation_input_tokens":2000000,"cache_creation":{"ephemeral_5m_input_tokens":1000000,"ephemeral_1h_input_tokens":1000000}}}}"#
+        check("cost1hCacheWritesAt2x", near(effortOf([split]).cost, 13))                       // 1M x $5 + 1M x $8
+        let unsplit = #"{"type":"assistant","message":{"id":"c2","model":"claude-opus-5-5","usage":{"cache_creation_input_tokens":2000000}}}"#
+        check("costUnsplitCacheWritesAt5m", near(effortOf([unsplit]).cost, 10))
+        let unknown = effortOf([#"{"type":"assistant","message":{"id":"u1","model":"claude-sonnet-9","usage":{"input_tokens":1000000}}}"#])
+        check("costUnknownModelIsEstimate", unknown.estimated && near(unknown.cost, 4))       // Opus 5.5 rates, flagged
+        check("canonicalModelStripsSuffixes", canonicalModel("claude-haiku-4-5-20251001") == "claude-haiku-4-5"
+              && canonicalModel("us.anthropic.claude-opus-5-5") == "claude-opus-5-5"
+              && canonicalModel("claude-opus-4-5@20251101") == "claude-opus-4-5"
+              && canonicalModel("claude-opus-5") == "claude-opus-5")
+        func haiku(_ n: Int) -> Double {
+            effortOf([#"{"type":"assistant","message":{"id":"h","model":"claude-haiku-5-5","usage":{"input_tokens":\#(n)}}}"#]).cost
+        }
+        check("costHaikuLongPromptTier", near(haiku(100_000), 0.01) && near(haiku(200_000), 0.10))
+        let fast = effortOf([#"{"type":"assistant","message":{"id":"f","model":"claude-opus-5-5","usage":{"output_tokens":1000000,"speed":"fast"}}}"#])
+        check("costFastModeDoubles", near(fast.cost, 40))
+        let us = effortOf([#"{"type":"assistant","message":{"id":"g","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"inference_geo":"us"}}}"#])
+        check("costUsGeoAdds10Pct", near(us.cost, 4.4))
+        let oddUsage = effortOf([#"{"type":"assistant","message":{"id":"o","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"speed":1,"cache_creation":"x"}}}"#])
+        check("usageToleratesOddShapes", oddUsage.inTok == 1_000_000 && near(oddUsage.cost, 4))
 
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
