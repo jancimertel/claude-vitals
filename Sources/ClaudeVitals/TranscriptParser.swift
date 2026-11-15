@@ -47,6 +47,7 @@ final class TranscriptParser {
                 let complete = Data(data.prefix(consumed))
                 for l in parseLines(complete, dropFirstPartial: false) {
                     guard l.type == "assistant", let msg = l.message else { continue }
+                    if msg.isSynthetic { continue }   // else e.model becomes "<synthetic>" and the session reprices at the opus fallback
                     e.inTok += msg.usage?.input_tokens ?? 0
                     e.outTok += msg.usage?.output_tokens ?? 0
                     e.cw += msg.usage?.cache_creation_input_tokens ?? 0

@@ -32,6 +32,22 @@ struct Message: Decodable {
     }
 }
 
+extension Message {
+    /// Claude Code's API-error placeholder lines carry model "<synthetic>" and all-zero usage.
+    var isSynthetic: Bool { model == "<synthetic>" }
+}
+
+struct CompactMetadata: Decodable {
+    let postTokens: Int?
+
+    enum CodingKeys: String, CodingKey { case postTokens }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        postTokens = (try? c.decodeIfPresent(Int.self, forKey: .postTokens)) ?? nil
+    }
+}
+
 struct Line: Decodable {
     let type: String?
     let cwd: String?
@@ -39,8 +55,10 @@ struct Line: Decodable {
     let timestamp: String?
     let message: Message?
     let aiTitle: String?   // present only on `type: "ai-title"` lines (Claude's auto chat title)
+    let subtype: String?   // e.g. "compact_boundary" on `type: "system"` lines
+    let compactMetadata: CompactMetadata?
 
-    enum CodingKeys: String, CodingKey { case type, cwd, gitBranch, timestamp, message, aiTitle }
+    enum CodingKeys: String, CodingKey { case type, cwd, gitBranch, timestamp, message, aiTitle, subtype, compactMetadata }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -50,6 +68,8 @@ struct Line: Decodable {
         timestamp = (try? c.decodeIfPresent(String.self, forKey: .timestamp)) ?? nil
         message = (try? c.decodeIfPresent(Message.self, forKey: .message)) ?? nil
         aiTitle = (try? c.decodeIfPresent(String.self, forKey: .aiTitle)) ?? nil
+        subtype = (try? c.decodeIfPresent(String.self, forKey: .subtype)) ?? nil
+        compactMetadata = (try? c.decodeIfPresent(CompactMetadata.self, forKey: .compactMetadata)) ?? nil
     }
 }
 

@@ -131,7 +131,7 @@ struct Entry {
         let plainN = HookEvent(event: "Notification", session_id: "s")
         check("untypedNotificationStillNoop", dot(.runningTool, plainN) == .runningTool && applyHookEvent(nil, plainN, at: now) == nil)
 
-        // Task 3: failed is sticky while liveness is confirmed, and alerts.
+        // failed is sticky while liveness is confirmed, and alerts.
         let failedHook = hook(.failed, "failed", at: -120)
         let rf1 = resolveState(heuristic: (.idle, "idle"), isLive: true, liveConfirmed: true, hook: failedHook, transcriptMtime: now.addingTimeInterval(-1), now: now)
         check("failedSurvivesSupersessionWhileLivenessConfirmed", rf1.dot == .failed && rf1.usedHook)
@@ -150,6 +150,27 @@ struct Entry {
         var t3 = TransitionTracker()
         _ = t3.update([card(.compacting)])
         check("manualCompactFinishingChimes", t3.update([card(.waiting)]) == [Alert(repo: "repo-a", kind: .finished)])
+
+        // Ring and cost ignore synthetic API-error lines; the ring follows compaction.
+        let real = #"{"type":"assistant","message":{"model":"claude-opus-4-8","usage":{"input_tokens":10,"cache_read_input_tokens":300000,"cache_creation_input_tokens":0}}}"#
+        let synth = #"{"type":"assistant","isApiErrorMessage":true,"message":{"model":"<synthetic>","stop_reason":"stop_sequence","usage":{"input_tokens":0,"output_tokens":0,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#
+        let boundary = #"{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"manual","preTokens":300010,"postTokens":23336}}"#
+        let bareBoundary = #"{"type":"system","subtype":"compact_boundary","compactMetadata":{"trigger":"auto"}}"#
+        func ctxOf(_ ls: [String]) -> (ctx: Int, limit: Int, model: String) {
+            deriveContext(parseLines(Data(ls.joined(separator: "\n").utf8), dropFirstPartial: false))
+        }
+        let rs = ctxOf([real, synth])
+        check("ringSkipsSyntheticLine", rs.ctx == 300010 && rs.limit == 1_000_000 && rs.model == "claude-opus-4-8")
+        let rb = ctxOf([real, boundary])
+        check("ringUsesCompactBoundary", rb.ctx == 23336 && rb.limit == 1_000_000 && rb.model == "claude-opus-4-8")
+        check("ringIgnoresOlderBoundary", ctxOf([boundary, real]).ctx == 300010)
+        check("ringIgnoresBoundaryWithoutPostTokens", ctxOf([real, bareBoundary]).ctx == 300010)
+        let costFile = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).jsonl")
+        let sonnet = #"{"type":"assistant","message":{"model":"claude-sonnet-4-6","stop_reason":"end_turn","usage":{"input_tokens":1000000,"output_tokens":0}}}"#
+        try? Data((sonnet + "\n" + synth + "\n").utf8).write(to: costFile)
+        let eff = TranscriptParser().effort(path: costFile.path)
+        try? FileManager.default.removeItem(at: costFile)
+        check("costIgnoresSyntheticModel", eff.model == "claude-sonnet-4-6" && abs(eff.cost - 3.0) < 1e-9)
 
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
