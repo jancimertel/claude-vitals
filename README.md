@@ -89,7 +89,7 @@ Data sources, all verified:
   message priced once at its own model's rate, 1-hour cache writes included.
 - **Sub-agents** — `<uuid>/subagents/agent-*.jsonl`; mtime < 10s ⇒ running.
 
-Polling is adaptive: **1.5s** while anything runs, **5s** idle. Parsing runs off the main thread
+Refresh is event-driven: a file watcher on the transcripts and the session registry rebuilds within about a second of any write. A backstop poll catches what no write announces (time thresholds, a crashed process): **2s** while a session without hooks runs or the popover is open, **15s** otherwise. Parsing runs off the main thread
 (a `Collector` actor); the UI publishes on the main actor.
 
 ---
@@ -124,7 +124,7 @@ Without the plugin the app falls back to transcript polling exactly as before. D
 | `SessionRegistry.swift` | Claude Code session registry: tolerant read, pid liveness + pid-reuse check, entry -> transcript. |
 | `Collector.swift` | Liveness (registry, pgrep/lsof fallback), candidate files, state/context/sub-agents, `buildSnapshot`, `Collector` actor. |
 | `TranscriptParser.swift` | Incremental effort cache (mtime+offset gated) + pricing. |
-| `Store.swift` | `@MainActor` observable store, adaptive poll loop, running→waiting edge detection. |
+| `Store.swift` | `@MainActor` observable store, file-watch-driven refresh loop with a backstop poll, running→waiting edge detection. |
 | `Views.swift` | Popover, header, session card, context ring, pulse dot, footer, menu-bar label. |
 | `Integrations.swift` | Notifications, chime, launch-at-login (all bundle-guarded). |
 | `Theme.swift` | Dark color tokens. `AppEnv.swift` | bundle detection gating bundle-only APIs. |

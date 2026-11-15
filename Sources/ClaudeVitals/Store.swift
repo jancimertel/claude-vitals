@@ -46,7 +46,7 @@ final class Store: ObservableObject {
     let label = MenuLabelModel()
 
     var popoverOpen = false {
-        didSet { if popoverOpen { catchUp() } }
+        didSet { if popoverOpen { catchUp(); refreshNow() } }
     }
 
     /// Hand the popover the latest snapshot. Also called on the click that opens it, since the
@@ -90,11 +90,14 @@ final class Store: ObservableObject {
     private var account = AccountWatcher()
     private var renderedKey: [Int] = []   // buckets the current label image was rendered for (see updateLabelImage)
     private var socket: EventSocket?
+    private var watcher: FileWatcher?
+    private var nap: Task<Void, Never>?   // the poll loop's current sleep; refreshNow cuts it short
+    private var dirty = false             // a refresh was asked for while a rebuild ran
 
-    init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
+    init() { startLoading(); start(); startUsage(); startSocket(); startWatcher(); startSweep() }
 
     isolated deinit {
-        loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); loadingLoop?.cancel(); socket?.stop()
+        loop?.cancel(); usageLoop?.cancel(); sweepLoop?.cancel(); loadingLoop?.cancel(); socket?.stop(); watcher?.stop(); nap?.cancel()
     }
 
     /// The menu-bar intro, until the first usage fetch returns: a gray dot grows and opens into the
@@ -158,16 +161,34 @@ final class Store: ObservableObject {
         apply(snap)
     }
 
+    /// Transcript and session-registry writes -> immediate rebuild, so a state change shows within about
+    /// a second without the plugin. The poll in start() stays as the backstop for what no write
+    /// announces: time thresholds (LIVE_FILE_S, the 60s ended mark, RECENT_WINDOW) and a process that
+    /// dies without removing its registry file.
+    private func startWatcher() {
+        let w = FileWatcher(dirs: [PROJ, SESSIONS_DIR]) { [weak self] in
+            Task { @MainActor in self?.refreshNow() }
+        }
+        w.start()
+        watcher = w
+    }
+
     private func start() {
         loop = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
+                self.dirty = false
                 let s = await self.collector.snapshot()
                 self.apply(s)
+                if self.dirty { continue }            // a write landed mid-rebuild and may not be in `s`
                 let busy = s.running > 0 || s.subsRunning > 0
-                // Hook events push updates via the socket, so the poll is only a backstop then.
-                let interval: Double = s.hookDriven ? 8 : (busy ? 2 : 8)
-                try? await Task.sleep(for: .seconds(interval))
+                // Writes wake the loop (refreshNow), so the poll only catches what no write announces.
+                // 2s keeps the 5s running -> waiting flip (LIVE_FILE_S) prompt for sessions without hooks,
+                // and the open popover's "Ns ago" moving. Otherwise 15s.
+                let interval: Double = self.popoverOpen || (busy && !s.hookDriven) ? 2 : 15
+                let nap = Task<Void, Never> { try? await Task.sleep(for: .seconds(interval)) }
+                self.nap = nap
+                await nap.value
             }
         }
     }
@@ -208,12 +229,12 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Rebuild now: cut the poll loop's sleep short, or, mid-rebuild, run one more right after it.
+    /// The file watcher, the Refresh button and opening the popover all come through here, so there is
+    /// one rebuild path and never more than one loop.
     func refreshNow() {
-        Task { [weak self] in
-            guard let self else { return }
-            let s = await self.collector.snapshot()
-            self.apply(s)
-        }
+        dirty = true
+        nap?.cancel()
     }
 
     private func apply(_ s: Snapshot) {
@@ -232,7 +253,7 @@ final class Store: ObservableObject {
     /// Re-rasterize the menu-bar ring only when the displayed integer %, the time mark's 1% step, or
     /// the presence of usage data changes. The SwiftUI `ImageRenderer` rasterize is the single most
     /// expensive per-tick op, and the ring is visually identical within a 1% bucket — so gating here
-    /// removes ~all redundant renders. The poll loop calls this every 2–8s, so the mark moves on
+    /// removes ~all redundant renders. The poll loop calls this at least every 15s, so the mark moves on
     /// time: a step is 3 min of the 5h window, ~1.7h of the weekly one.
     private func updateLabelImage() {
         guard loadingLoop == nil else { return }       // the loading animation owns the image
@@ -339,7 +360,7 @@ final class Store: ObservableObject {
 
     /// Show the last fetched usage regardless of age (the strip displays how old it is). Fetching is
     /// gated on activity, so the value may be minutes old — that's surfaced as "updated Xm ago".
-    /// Windows past their reset show 0%. The poll loop re-renders the ring within 2–8s of a reset.
+    /// Windows past their reset show 0%. The poll loop re-renders the ring within 15s of a reset.
     var freshUsage: RateUsage? { usage?.current() }
 
     /// Text beside the glyph: just the running count (the usage % now lives inside the ring).
