@@ -78,7 +78,8 @@ Data sources, all verified:
 - **Live sessions** - Claude Code's session registry, `~/.claude/sessions/<pid>.json` (the data behind
   `claude agents --json`): one entry per running session with its `sessionId` and `cwd`. An entry is
   live when its pid is running and that process started no later than the session, which rules out a
-  stale file whose pid was reused. When the registry reports no live session (no directory on older
+  stale file whose pid was reused. The entry's `status` turns `idle` as soon as a turn finishes, so the
+  card shows "waiting prompt" within about a second without the plugin. When the registry reports no live session (no directory on older
   Claude Code, or a directory the running version does not populate) the app falls back to
   `pgrep` + `lsof` and treats the newest transcript per repo as the live one.
 - **Transcripts** - `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity (a transcript ending in bookkeeping lines, untimestamped or `queue-operation`, is dated from its last real timestamped line).
