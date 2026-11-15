@@ -19,6 +19,16 @@ SETTINGS="$HOME/.claude/settings.json"
 [ -f "$SRC_HOOKS" ] || { echo "error: hooks.json not found at $SRC_HOOKS" >&2; exit 1; }
 command -v python3 >/dev/null || { echo "error: python3 required" >&2; exit 1; }
 
+# 0. Older Claude Code ignores the WHOLE settings.json on unknown hook names (before 2.1.101), so refuse early.
+MIN_CC=2.1.89
+CC_VER=$(claude --version 2>/dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+' | head -n1 || true)
+if [ -z "$CC_VER" ]; then
+  echo "warning: could not check the Claude Code version; $MIN_CC+ is required" >&2
+elif python3 -c 'import sys; v=lambda s: tuple(map(int, s.split("."))); sys.exit(v(sys.argv[1]) >= v(sys.argv[2]))' "$CC_VER" "$MIN_CC"; then
+  echo "error: Claude Code $CC_VER is older than $MIN_CC; older builds can ignore the whole settings.json on unknown hook names" >&2
+  exit 1
+fi
+
 # 1. Stage the hook script in a stable, repo-independent location.
 mkdir -p "$DEST_DIR"
 cp "$SRC_EMIT" "$DEST_EMIT"

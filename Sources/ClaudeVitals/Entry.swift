@@ -113,6 +113,7 @@ struct Entry {
         check("subagentStopFailureIgnored", dot(.runningModel, HookEvent(event: "StopFailure", session_id: "s", error: "rate_limit", agent_id: "a1")) == .runningModel)
         check("sessionStartCompactKeepsState", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "compact")) == .runningModel)
         check("sessionStartStartupGoesWaiting", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "startup")) == .waiting)
+        check("sessionStartWithoutSourceGoesWaiting", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s")) == .waiting)
         let pc = applyHookEvent(st(.runningTool), HookEvent(event: "PreCompact", session_id: "s", trigger: "auto"), at: now)
         check("autoPreCompactWhileRunning", pc?.dot == .compacting && pc?.state == "compacting")
         check("autoPreCompactWhileWaitingIgnored", dot(.waiting, HookEvent(event: "PreCompact", session_id: "s", trigger: "auto")) == .waiting)
@@ -123,6 +124,10 @@ struct Entry {
         check("toolFailureAndDenialGoRunningModel",
               dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s")) == .runningModel
               && dot(.waitingPermission, HookEvent(event: "PermissionDenied", session_id: "s")) == .runningModel)
+        check("interruptedToolGoesWaiting",
+              dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s", is_interrupt: true)) == .waiting
+              && dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s", is_interrupt: false)) == .runningModel
+              && dec(#"{"hook_event_name":"PostToolUseFailure","session_id":"s","is_interrupt":true}"#)?.is_interrupt == true)
         let idleN = HookEvent(event: "Notification", session_id: "s", notification_type: "idle_prompt")
         check("idlePromptOnlyWhileRunning", dot(.runningTool, idleN) == .waiting && dot(.failed, idleN) == .failed)
         let permN = HookEvent(event: "Notification", session_id: "s", notification_type: "permission_prompt")

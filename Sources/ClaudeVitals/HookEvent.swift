@@ -14,11 +14,12 @@ struct HookEvent: Decodable, Sendable {
     let transcript_path: String?
     let tool_name: String?
     let source, trigger, error, notification_type, agent_id, agent_type, permission_mode, effortLevel: String?
+    let is_interrupt: Bool?
 
     enum CodingKeys: String, CodingKey {
         case event = "hook_event_name"
         case session_id, cwd, transcript_path, tool_name
-        case source, trigger, error, notification_type, agent_id, agent_type, permission_mode
+        case source, trigger, error, notification_type, agent_id, agent_type, permission_mode, is_interrupt
         case effortLevel = "effort"
     }
 
@@ -27,12 +28,13 @@ struct HookEvent: Decodable, Sendable {
 
     init(event: String, session_id: String, cwd: String? = nil, transcript_path: String? = nil, tool_name: String? = nil,
          source: String? = nil, trigger: String? = nil, error: String? = nil, notification_type: String? = nil,
-         agent_id: String? = nil, agent_type: String? = nil, permission_mode: String? = nil, effortLevel: String? = nil) {
+         agent_id: String? = nil, agent_type: String? = nil, permission_mode: String? = nil, effortLevel: String? = nil,
+         is_interrupt: Bool? = nil) {
         self.event = event; self.session_id = session_id
         self.cwd = cwd; self.transcript_path = transcript_path; self.tool_name = tool_name
         self.source = source; self.trigger = trigger; self.error = error; self.notification_type = notification_type
         self.agent_id = agent_id; self.agent_type = agent_type; self.permission_mode = permission_mode
-        self.effortLevel = effortLevel
+        self.effortLevel = effortLevel; self.is_interrupt = is_interrupt
     }
 
     // New fields all use `try?`: EventSocket silently drops undecodable payloads, so an unexpected shape
@@ -52,6 +54,7 @@ struct HookEvent: Decodable, Sendable {
         agent_type = try? c.decodeIfPresent(String.self, forKey: .agent_type)
         permission_mode = try? c.decodeIfPresent(String.self, forKey: .permission_mode)
         effortLevel = (try? c.decodeIfPresent(EffortPayload.self, forKey: .effortLevel))?.level
+        is_interrupt = try? c.decodeIfPresent(Bool.self, forKey: .is_interrupt)
     }
 }
 
@@ -70,6 +73,8 @@ struct HookStatus: Sendable {
 /// a stateless event arrives with no prior status: there is nothing real to refresh, and minting a
 /// fabricated "idle" would stick under confirmed liveness. Falls through (refresh `at` only): untyped or
 /// other-typed Notification, subagent StopFailure, ungated compaction events, SubagentStart/Stop, unknown.
+/// Known ceiling: a cancelled or failed manual /compact sends no PostCompact, so "compacting" stays until the
+/// next hook event; it counts as running, so a guarded idle_prompt clears it after about 60s.
 func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookStatus? {
     var s = prev ?? HookStatus(dot: .idle, state: "idle", toolName: nil, alive: true, at: now)
     s.at = now
@@ -79,6 +84,9 @@ func applyHookEvent(_ prev: HookStatus?, _ e: HookEvent, at now: Date) -> HookSt
     case "SessionEnd":        s.alive = false; s.dot = .ended;            s.state = "ended";          s.toolName = nil
     case "UserPromptSubmit":  s.dot = .runningModel; s.state = "running model"; s.toolName = nil
     case "PreToolUse":        s.dot = .runningTool;  s.state = "running \(e.tool_name ?? "tool")"; s.toolName = e.tool_name
+    // An interrupt (Esc) ends the turn and no Stop follows, so go to waiting rather than stick on "running model".
+    case "PostToolUseFailure" where e.is_interrupt == true:
+                              s.dot = .waiting;      s.state = "waiting prompt"; s.toolName = nil
     case "PostToolUse", "PostToolUseFailure", "PermissionDenied":
                               s.dot = .runningModel; s.state = "running model"; s.toolName = nil
     case "PermissionRequest": s.dot = .waitingPermission; s.state = "needs permission"; s.toolName = e.tool_name

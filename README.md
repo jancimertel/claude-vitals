@@ -84,7 +84,7 @@ Data sources, all verified:
 - **Transcripts** — `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity.
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
   non-conversational lines) + file age.
-- **Context %** - latest real `usage` line (API-error placeholder lines skipped), or the post-compaction size right after a compaction; `input + cache_read + cache_creation` ÷ window (200k, or 1M).
+- **Context %** - latest real `usage` line (API-error placeholder lines skipped), or the post-compaction size right after a compaction (approximate until the next reply, since it leaves out the system prompt and tool definitions); `input + cache_read + cache_creation` ÷ window (200k, or 1M).
 - **Effort/cost** — incremental byte-offset parse (only newly appended bytes each poll), per-model
   pricing table.
 - **Sub-agents** — `<uuid>/subagents/agent-*.jsonl`; mtime < 10s ⇒ running.
@@ -101,7 +101,7 @@ bundled Claude Code plugin once:
 
     /plugin install ./plugin/claude-vitals
 
-Existing plugin installs pick the new events up with `/plugin update` (plugin 0.2.0); `install.sh` users re-run it.
+Existing plugin installs pick the new events up with `/plugin update` (plugin 0.2.0); `install.sh` users re-run it. The hooks need Claude Code 2.1.89 or newer.
 
 At user scope it applies to every session in every repo. Its hooks push lifecycle events over a Unix
 domain socket (`~/.claude-vitals/vitals.sock`) to the running app, which uses them as the authoritative,
