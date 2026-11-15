@@ -11,26 +11,52 @@ struct MenuLabel: View {
             } else {
                 Image(systemName: store.runningCount > 0 ? "circle.fill" : "circle")
                     .symbolRenderingMode(.multicolor)
-                    .foregroundStyle(store.runningCount > 0 ? .green : .secondary)
+                    .foregroundStyle(store.runningCount > 0 ? Theme.runningModel : .secondary)
             }
             // Just the ring/circle in the menu bar — the running count lives in the popover header.
         }
     }
 }
 
+/// Aurora's menu-bar tile: the glyph on the icon's navy, so it reads as the app on any menu bar.
+struct MenuTile<Content: View>: View {
+    @ViewBuilder let content: Content
+    var body: some View {
+        content
+            .frame(width: 22, height: 22)
+            // The icon's lighter navy: Theme.bgWindow is too close to a dark menu bar to show.
+            .background(Color(hex: 0x252C3D), in: Circle())
+    }
+}
+
+/// Menu-bar dot for Aurora when there's no usage data: filled while sessions run, hollow when idle.
+struct StatusDot: View {
+    let running: Bool
+    var body: some View {
+        if running {
+            Circle().fill(Theme.runningModel).frame(width: 9, height: 9)
+        } else {
+            Circle().stroke(Theme.textSecondary, lineWidth: 1.5).frame(width: 9, height: 9)
+        }
+    }
+}
+
 /// Circular usage gauge used both in the menu bar (rendered to an image) and the popover.
-/// green → amber → orange → red, with a filled center when ≥100% (limit exceeded).
+/// Colored per `theme` (see Theme.usage).
 struct LoaderRing: View {
     let pct: Double
+    let theme: AppTheme
     var size: CGFloat = 18
 
     private var clamped: Double { min(max(pct, 0), 100) }
     var body: some View {
-        let color = Theme.usage(pct)
+        let color = Theme.usage(pct, theme)
+        let lineWidth = size * 0.13
         ZStack {
-            Circle().stroke(Color.gray.opacity(0.4), lineWidth: size * 0.13)
-            Circle().trim(from: 0, to: clamped / 100)
-                .stroke(color, style: StrokeStyle(lineWidth: size * 0.13, lineCap: .round))
+            // Inset by half the line width so the stroke stays inside `size`: ImageRenderer clips
+            // anything past the frame, which cut off the ring's outer edge in the menu bar.
+            Circle().inset(by: lineWidth / 2).trim(from: 0, to: clamped / 100)
+                .stroke(color, style: StrokeStyle(lineWidth: lineWidth, lineCap: .round))
                 .rotationEffect(.degrees(-90))
             Text("\(Int(clamped.rounded()))")            // the % inside the ring
                 .font(.system(size: size * 0.44, weight: .bold, design: .rounded))
@@ -45,6 +71,7 @@ struct LoaderRing: View {
 /// Strip under the header showing the two subscription windows as bars (only when data is fresh).
 struct UsageStripView: View {
     let usage: RateUsage
+    let theme: AppTheme
     var narrow = false                                 // single-column popover: too tight for one row
     var body: some View {
         // TimelineView re-evaluates on open (and every 15s while open) so the "updated" age and reset
@@ -79,15 +106,15 @@ struct UsageStripView: View {
 
     @ViewBuilder private func bar(_ label: String, _ pct: Double?, _ reset: Date?, _ now: Date) -> some View {
         if let pct {
-            let c = Theme.usage(pct)
+            let c = Theme.usage(pct, theme)
             HStack(spacing: 6) {
                 Text(label).font(.system(size: 10)).foregroundStyle(Theme.textTertiary)
                 ZStack(alignment: .leading) {
-                    Capsule().fill(Color.gray.opacity(0.25)).frame(width: 64, height: 5)
+                    Capsule().fill(Theme.hairline).frame(width: 64, height: 5)
                     Capsule().fill(c).frame(width: 64 * min(max(pct, 0), 100) / 100, height: 5)
                 }
                 Text("\(Int(pct))%").font(.system(size: 10, weight: .semibold)).monospacedDigit()
-                    .foregroundStyle(pct >= 100 ? Color(hex: 0xF87171) : Theme.textPrimary)
+                    .foregroundStyle(pct >= 100 ? Theme.danger : Theme.textPrimary)
                 if let r = resetIn(reset, now: now) {
                     Text("· \(r)").font(.system(size: 9)).foregroundStyle(Theme.textTertiary)
                 }
@@ -118,7 +145,7 @@ struct PopoverView: View {
             HeaderView(store: store)
             if let u = store.freshUsage {
                 Divider().overlay(Theme.hairline)
-                UsageStripView(usage: u, narrow: cols == 1)
+                UsageStripView(usage: u, theme: store.theme, narrow: cols == 1)
             }
             Divider().overlay(Theme.hairline)
 
@@ -140,6 +167,7 @@ struct PopoverView: View {
             Divider().overlay(Theme.hairline)
             FooterView(store: store, narrow: cols == 1)
         }
+        .id(store.theme)                               // rebuild so every child picks up the new Theme colors
         .frame(width: CGFloat(cols) * 264 + CGFloat(cols - 1) * 10 + 24)
         .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bgWindow.opacity(0.92))
@@ -444,6 +472,12 @@ struct FooterView: View {
             }
             .buttonStyle(.plain)
             .help("Refresh")
+
+            Picker("Theme", selection: $store.theme) {
+                ForEach(AppTheme.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented).labelsHidden().controlSize(.mini).fixedSize()
+            .help("Color theme")
 
             Toggle("Sound", isOn: $sound)
                 .toggleStyle(.switch).controlSize(.mini).fixedSize()

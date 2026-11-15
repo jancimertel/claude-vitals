@@ -10,40 +10,85 @@ extension Color {
     }
 }
 
-enum Theme {
-    static let bgWindow = Color(hex: 0x0E1014)
-    static let scrim = Color(hex: 0x16191F)
-    static let card = Color(hex: 0x1B1F27)
-    static let cardHover = Color(hex: 0x222732)
-    static let inset = Color(hex: 0x0F1216)
-    static let hairline = Color(hex: 0x2A2F3A)
+/// App color theme, chosen in the footer. Classic is the original look; Aurora follows the app
+/// icon: slate-navy surfaces and a teal → sky → indigo → violet accent range.
+enum AppTheme: String, CaseIterable, Identifiable {
+    case classic, aurora
+    var id: Self { self }
+    var title: String { self == .classic ? "Classic" : "Aurora" }
 
-    static let textPrimary = Color(hex: 0xF2F4F8)
-    static let textSecondary = Color(hex: 0xAEB6C2)
-    static let textTertiary = Color(hex: 0x6E7682)
-    static let accent = Color(hex: 0x7C9CF5)
-
-    static let runningModel = Color(hex: 0x34D399)
-    static let runningTool = Color(hex: 0x38BDF8)
-    static let waiting = Color(hex: 0xFBBF24)
-    static let idle = Color(hex: 0x6B7280)
-
-    static func ring(_ pct: Double) -> Color {
-        if pct < 60 { return Color(hex: 0x34D399) }
-        if pct < 80 { return Color(hex: 0xFBBF24) }
-        if pct < 90 { return Color(hex: 0xFB923C) }
-        return Color(hex: 0xF87171)
+    // The key predates Aurora covering the whole popover; kept so the saved choice survives.
+    static var saved: AppTheme {
+        get { UserDefaults.standard.string(forKey: "gaugeTheme").flatMap(AppTheme.init) ?? .classic }
+        set { UserDefaults.standard.set(newValue.rawValue, forKey: "gaugeTheme") }
     }
 
-    /// Subscription-usage gauge color: green near 0 → red near 100 (discrete breakpoints).
-    static func usage(_ pct: Double) -> Color {
-        switch pct {
-        case ..<25: return Color(hex: 0x34D399)   // green
-        case ..<50: return Color(hex: 0x84CC16)   // lime
-        case ..<70: return Color(hex: 0xFACC15)   // yellow
-        case ..<88: return Color(hex: 0xF97316)   // orange
-        default:    return Color(hex: 0xEF4444)   // red
-        }
+    fileprivate var palette: Palette { self == .classic ? .classic : .aurora }
+}
+
+struct Palette {
+    let bgWindow, scrim, card, cardHover, inset, hairline: Color
+    let textPrimary, textSecondary, textTertiary, accent: Color
+    let runningModel, runningTool, waiting, idle, danger: Color
+    /// Context-ring colors at <60%, <80%, <90%, and above.
+    let ring: [Color]
+    /// Usage-gauge colors at <25%, <50%, <70%, <88%, and above.
+    let usage: [Color]
+
+    static let classic = Palette(
+        bgWindow: Color(hex: 0x0E1014), scrim: Color(hex: 0x16191F), card: Color(hex: 0x1B1F27),
+        cardHover: Color(hex: 0x222732), inset: Color(hex: 0x0F1216), hairline: Color(hex: 0x2A2F3A),
+        textPrimary: Color(hex: 0xF2F4F8), textSecondary: Color(hex: 0xAEB6C2),
+        textTertiary: Color(hex: 0x6E7682), accent: Color(hex: 0x7C9CF5),
+        runningModel: Color(hex: 0x34D399), runningTool: Color(hex: 0x38BDF8),
+        waiting: Color(hex: 0xFBBF24), idle: Color(hex: 0x6B7280), danger: Color(hex: 0xF87171),
+        ring: [0x34D399, 0xFBBF24, 0xFB923C, 0xF87171].map { Color(hex: $0) },
+        usage: [0x34D399, 0x84CC16, 0xFACC15, 0xF97316, 0xEF4444].map { Color(hex: $0) })
+
+    static let aurora = Palette(
+        bgWindow: Color(hex: 0x111623), scrim: Color(hex: 0x171D2C), card: Color(hex: 0x1C2333),
+        cardHover: Color(hex: 0x242C3F), inset: Color(hex: 0x0F131D), hairline: Color(hex: 0x2C3446),
+        textPrimary: Color(hex: 0xF1F5F9), textSecondary: Color(hex: 0xA9B4C8),
+        textTertiary: Color(hex: 0x6B7790), accent: Color(hex: 0x818CF8),
+        runningModel: Color(hex: 0x2DD4BF), runningTool: Color(hex: 0x38BDF8),
+        // Pink is not in the icon; it marks the states that need you, so it must stand apart.
+        waiting: Color(hex: 0xF472B6), idle: Color(hex: 0x64748B), danger: Color(hex: 0xF472B6),
+        ring: [0x2DD4BF, 0x818CF8, 0xC084FC, 0xF472B6].map { Color(hex: $0) },
+        usage: [0x2DD4BF, 0x38BDF8, 0x818CF8, 0xC084FC, 0xF472B6].map { Color(hex: $0) })
+}
+
+/// Colors for the current theme. Views read these statics, so the popover re-creates its content
+/// (`.id(store.theme)`) when the theme changes; otherwise unchanged child views keep old colors.
+enum Theme {
+    // Written only on the main thread, from Store.theme's didSet.
+    nonisolated(unsafe) static var current: AppTheme = .saved
+    private static var p: Palette { current.palette }
+
+    static var bgWindow: Color { p.bgWindow }
+    static var scrim: Color { p.scrim }
+    static var card: Color { p.card }
+    static var cardHover: Color { p.cardHover }
+    static var inset: Color { p.inset }
+    static var hairline: Color { p.hairline }
+
+    static var textPrimary: Color { p.textPrimary }
+    static var textSecondary: Color { p.textSecondary }
+    static var textTertiary: Color { p.textTertiary }
+    static var accent: Color { p.accent }
+
+    static var runningModel: Color { p.runningModel }
+    static var runningTool: Color { p.runningTool }
+    static var waiting: Color { p.waiting }
+    static var idle: Color { p.idle }
+    static var danger: Color { p.danger }
+
+    static func ring(_ pct: Double) -> Color {
+        p.ring[pct < 60 ? 0 : pct < 80 ? 1 : pct < 90 ? 2 : 3]
+    }
+
+    /// Subscription-usage gauge color (discrete breakpoints).
+    static func usage(_ pct: Double, _ theme: AppTheme) -> Color {
+        theme.palette.usage[pct < 25 ? 0 : pct < 50 ? 1 : pct < 70 ? 2 : pct < 88 ? 3 : 4]
     }
 
     static func state(_ d: Dot) -> Color {
