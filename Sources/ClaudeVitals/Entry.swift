@@ -131,6 +131,26 @@ struct Entry {
         let plainN = HookEvent(event: "Notification", session_id: "s")
         check("untypedNotificationStillNoop", dot(.runningTool, plainN) == .runningTool && applyHookEvent(nil, plainN, at: now) == nil)
 
+        // Task 3: failed is sticky while liveness is confirmed, and alerts.
+        let failedHook = hook(.failed, "failed", at: -120)
+        let rf1 = resolveState(heuristic: (.idle, "idle"), isLive: true, liveConfirmed: true, hook: failedHook, transcriptMtime: now.addingTimeInterval(-1), now: now)
+        check("failedSurvivesSupersessionWhileLivenessConfirmed", rf1.dot == .failed && rf1.usedHook)
+        let rf2 = resolveState(heuristic: (.idle, "idle"), isLive: true, liveConfirmed: false, hook: failedHook, transcriptMtime: now.addingTimeInterval(-1), now: now)
+        check("failedFallsBackWhenLivenessUnconfirmed", rf2.dot == .idle && !rf2.usedHook)
+        func card(_ d: Dot) -> Block {
+            Block(sessionId: "a", repo: "repo-a", title: "", cwd: "", branch: "", age: 0, dot: d, state: "",
+                  ctx: 0, ctxLimit: 200_000, ctxPct: 0, model: "?", inTok: 0, outTok: 0, cw: 0, cr: 0,
+                  cost: 0, turns: 0, tools: 0, subsTotal: 0, subsRunning: 0, live: true, pids: 1)
+        }
+        var t1 = TransitionTracker()
+        _ = t1.update([card(.runningModel)])
+        check("runningToFailedAlertsFailed", t1.update([card(.failed)]) == [Alert(repo: "repo-a", kind: .failed)])
+        var t2 = TransitionTracker()
+        check("autoCompactionIsSilent", [Dot.runningModel, .compacting, .runningModel].allSatisfy { t2.update([card($0)]).isEmpty })
+        var t3 = TransitionTracker()
+        _ = t3.update([card(.compacting)])
+        check("manualCompactFinishingChimes", t3.update([card(.waiting)]) == [Alert(repo: "repo-a", kind: .finished)])
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {

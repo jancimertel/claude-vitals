@@ -44,8 +44,8 @@ Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on 
 - **Footer** — icon buttons: Refresh, theme switch (Classic/Aurora), sound on/off, Quit.
 - **Right-click the menu-bar icon** — Launch at Login (bundled only), Quit.
 
-**Alerts** — when a session transitions running → waiting, a one-shot chime (always) + notification
-(bundled). Edge-triggered, so no repeated dinging.
+**Alerts** - when a session transitions running → waiting, needs permission, or failed (failed
+needs the plugin), a one-shot chime (always) + notification (bundled). Edge-triggered, so no repeated dinging.
 
 ---
 

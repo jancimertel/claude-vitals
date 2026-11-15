@@ -12,11 +12,14 @@ import Foundation
 /// transcript normally does not overtake the hook this way - the pending `tool_use` line is written
 /// BEFORE `PermissionRequest` fires, and the transcript then sits still while the user decides - but a
 /// sibling tool call in the same parallel batch can still append a `tool_result` after the window, so
-/// `waitingPermission` is exempted outright rather than trusted to timing.
+/// `waitingPermission` is exempted outright rather than trusted to timing. `failed` is exempted too:
+/// after a terminal API error Claude Code still appends metadata lines (last-prompt, ai-title), and the
+/// heuristic would read the zero-usage `<synthetic>` error line as "running" and then "idle".
 ///
 /// ponytail: known ceiling - a DROPPED hook event (delivery is best-effort) whose contradicting transcript
 /// write lands inside the window is not superseded, so a stale "running X" can persist until the next hook
-/// event. Tightening the bound would misfire on ordinary parallel tool calls.
+/// event. Tightening the bound would misfire on ordinary parallel tool calls. An exempt `waitingPermission`
+/// or `failed` clears on the next hook event or when the session stops being confirmed live.
 func resolveState(heuristic: (dot: Dot, state: String), isLive: Bool, liveConfirmed: Bool,
                   hook: HookStatus?, transcriptMtime: Date, now: Date)
     -> (dot: Dot, state: String, live: Bool, usedHook: Bool) {
@@ -24,9 +27,10 @@ func resolveState(heuristic: (dot: Dot, state: String), isLive: Bool, liveConfir
         let fresh = now.timeIntervalSince(h.at) < HOOK_FRESH_S
         // A pending permission prompt is exempt: hooks are demonstrably alive (one just fired), so a
         // sibling tool_result landing while the user decides must not revoke the badge - that flicker
-        // would also re-fire the alert. It clears on the next hook event or when the session stops
-        // being confirmed live.
-        let superseded = h.dot != .waitingPermission
+        // would also re-fire the alert. `failed` is exempt because the transcript has no reliable
+        // failure signal and its trailing metadata lines would otherwise mask it. Both clear on the
+        // next hook event or when the session stops being confirmed live.
+        let superseded = h.dot != .waitingPermission && h.dot != .failed
             && transcriptMtime.timeIntervalSince(h.at) > HOOK_FRESH_S
         if fresh || (liveConfirmed && !superseded) {
             return (h.dot, h.state, h.alive, true)

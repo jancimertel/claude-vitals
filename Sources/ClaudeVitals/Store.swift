@@ -1,10 +1,10 @@
 import AppKit
 import SwiftUI
 
-enum AlertKind: Sendable { case finished, needsPermission }
+enum AlertKind: Sendable { case finished, needsPermission, failed }
 struct Alert: Sendable, Equatable { let repo: String; let kind: AlertKind }
 
-/// Edge detector: fire alerts only on running -> waiting/permission transitions (not every poll).
+/// Edge detector: fire alerts only on running -> waiting/permission/failed transitions (not every poll).
 struct TransitionTracker {
     private var prev: [String: Dot] = [:]
 
@@ -15,6 +15,7 @@ struct TransitionTracker {
             seen.insert(b.sessionId)
             if let was = prev[b.sessionId], was.isRunning {
                 if b.dot == .waitingPermission { alerts.append(Alert(repo: b.repo, kind: .needsPermission)) }
+                else if b.dot == .failed { alerts.append(Alert(repo: b.repo, kind: .failed)) }
                 else if b.dot == .waiting { alerts.append(Alert(repo: b.repo, kind: .finished)) }
             }
             prev[b.sessionId] = b.dot
