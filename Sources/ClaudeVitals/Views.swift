@@ -582,9 +582,12 @@ struct PulseDot: View {
     private var pulsing: Bool { active && visible }
     var body: some View {
         Circle().fill(color).frame(width: size, height: size)
-            .opacity(pulsing ? (on ? 0.35 : 1) : 1)
-            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
-                       value: on)
+            // Scoped to opacity: with `.animation(_:value:)` a layout change landing in the same update
+            // (cards catching up as the popover opens) got the endless pulse too, so the dot swung
+            // between its old and new spot, out of its badge.
+            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default) {
+                $0.opacity(pulsing ? (on ? 0.35 : 1) : 1)
+            }
             .onAppear { on = pulsing }
             .id(pulsing)   // new identity drops the in-flight repeatForever; swapping the animation alone doesn't stop it
             .onChange(of: pulsing) { _, nowPulsing in on = nowPulsing }   // restart pulse on each open / idle->running
