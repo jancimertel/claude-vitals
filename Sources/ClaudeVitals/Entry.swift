@@ -217,6 +217,24 @@ struct Entry {
         check("noStampWhenLastLineStamped", lastStamp(linesOf([costState, turnEnd])) == nil)
         check("noStampWithoutAnyStamp", lastStamp(linesOf([lastPrompt, costState])) == nil)
 
+        // The watcher fires for a watched dir created after it started (older Claude Code has no
+        // sessions dir), and ignores writes elsewhere under the same parent. The temp dir sits under
+        // /var, which FSEvents reports as /private/var, so this also pins the path canonicalization.
+        let wRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: wRoot, withIntermediateDirectories: true)
+        let wDir = wRoot.appendingPathComponent("sessions")
+        let fired = DispatchSemaphore(value: 0)
+        let watcher = FileWatcher(dirs: [wDir], latency: 0.1) { fired.signal() }
+        watcher.start()
+        Thread.sleep(forTimeInterval: 0.5)                  // FSEvents reports only writes after the stream is live
+        try? Data("x".utf8).write(to: wRoot.appendingPathComponent("other.json"))
+        check("watcherIgnoresSiblings", fired.wait(timeout: .now() + 1.5) == .timedOut)
+        try? FileManager.default.createDirectory(at: wDir, withIntermediateDirectories: true)
+        try? Data("x".utf8).write(to: wDir.appendingPathComponent("1.json"))
+        check("watcherSeesDirCreatedLater", fired.wait(timeout: .now() + 3) == .success)
+        watcher.stop()
+        try? FileManager.default.removeItem(at: wRoot)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {
