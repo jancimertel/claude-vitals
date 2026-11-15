@@ -81,7 +81,7 @@ Data sources, all verified:
   stale file whose pid was reused. When the registry reports no live session (no directory on older
   Claude Code, or a directory the running version does not populate) the app falls back to
   `pgrep` + `lsof` and treats the newest transcript per repo as the live one.
-- **Transcripts** — `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity.
+- **Transcripts** - `~/.claude/projects/<encoded-path>/<uuid>.jsonl`; file mtime = activity (a transcript ending in bookkeeping lines, untimestamped or `queue-operation`, is dated from its last real timestamped line).
 - **State** — scans the tail backward for the last `user`/`assistant` line (transcripts end with
   non-conversational lines) + file age.
 - **Context %** - latest real `usage` line (API-error placeholder lines skipped), or the post-compaction size right after a compaction (approximate until the next reply, since it leaves out the system prompt and tool definitions); `input + cache_read + cache_creation` ÷ window (200k, or 1M).
@@ -89,7 +89,7 @@ Data sources, all verified:
   message priced once at its own model's rate, 1-hour cache writes included.
 - **Sub-agents** — `<uuid>/subagents/agent-*.jsonl`; mtime < 10s ⇒ running.
 
-Refresh is event-driven: a file watcher on the transcripts and the session registry rebuilds within about a second of any write. A backstop poll catches what no write announces (time thresholds, a crashed process): **2s** while a session without hooks runs or the popover is open, **15s** otherwise. Parsing runs off the main thread
+Refresh is event-driven: a file watcher on the transcripts and the session registry rebuilds within about a second of any write. A backstop poll catches what no write announces (time thresholds, a crashed process): **2s** while a session runs and no session is hook-driven, or while the popover is open, **15s** otherwise. Parsing runs off the main thread
 (a `Collector` actor); the UI publishes on the main actor.
 
 ---
@@ -109,7 +109,7 @@ low-latency source of session state while the transcript stays the source of tok
 state stays authoritative while the session registry confirms the session is alive, and falls back to
 transcript polling when it can't be confirmed (a fresh hook still wins for one short window regardless)
 or the transcript advances without new hook events.
-Without the plugin the app falls back to transcript polling exactly as before. Disable anytime via
+Without the plugin the app falls back to watching the transcripts. Disable anytime via
 `/plugin`.
 
 ---
