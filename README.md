@@ -37,7 +37,7 @@ Requires only the Swift toolchain (Xcode Command Line Tools). Built/verified on 
 - **Header** — running count, sub-agents running, and total tokens / cost *this session*.
 - **Cards** (1–3 column grid, one per active session):
   - **Context ring** — circular gauge, green→amber→orange→red as the window fills, % + token count.
-  - **State badge** — 🟢 running model · 🔧 running tool · 🟡 waiting prompt · ⚪️ idle (pulses while running).
+  - **State badge** - 🟢 running model · 🔧 running tool · 🟡 waiting prompt · ⚪️ idle · 🗜️ compacting · 🔴 failed (API error) (pulses while running; compacting and failed need the plugin).
   - repo name, git branch, model.
   - **Effort row** — ↑input ↓output tokens, cache, $cost, turns, tool-calls.
   - **Sub-agent chips** — a dot per running sub-agent + total.

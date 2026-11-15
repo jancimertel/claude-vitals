@@ -91,6 +91,46 @@ struct Entry {
         let r8 = resolveState(heuristic: heuristic, isLive: true, liveConfirmed: false, hook: hook(.ended, "ended", at: 0, alive: false), transcriptMtime: now, now: now)
         check("hookLivenessOverridesProcessLiveness", r8.dot == .ended && r8.usedHook && !r8.live)
 
+        // Newer hook events: decoding and state mapping.
+        func dec(_ json: String) -> HookEvent? { try? JSONDecoder().decode(HookEvent.self, from: Data(json.utf8)) }
+        func st(_ d: Dot) -> HookStatus { HookStatus(dot: d, state: "x", toolName: "T", alive: true, at: now) }
+        func dot(_ d: Dot, _ e: HookEvent) -> Dot? { applyHookEvent(st(d), e, at: now)?.dot }
+
+        let nf = dec(#"{"hook_event_name":"StopFailure","session_id":"s","error":"rate_limit","agent_type":"general-purpose","permission_mode":"auto","effort":{"level":"high"},"source":"startup","trigger":"auto","notification_type":"idle_prompt","agent_id":"a1"}"#)
+        check("decodesNewFields", nf?.error == "rate_limit" && nf?.effortLevel == "high" && nf?.permission_mode == "auto"
+              && nf?.agent_type == "general-purpose" && nf?.agent_id == "a1" && nf?.source == "startup"
+              && nf?.trigger == "auto" && nf?.notification_type == "idle_prompt")
+        let old = dec(#"{"hook_event_name":"Stop","session_id":"s"}"#)
+        check("oldPayloadDecodes", old != nil && old?.source == nil && old?.trigger == nil && old?.error == nil
+              && old?.notification_type == nil && old?.agent_id == nil && old?.agent_type == nil
+              && old?.permission_mode == nil && old?.effortLevel == nil)
+        let odd = dec(#"{"hook_event_name":"StopFailure","session_id":"s","effort":"high","error":{"type":"x"}}"#)
+        check("oddFieldShapesStillDecode", odd != nil && odd?.effortLevel == nil && odd?.error == nil
+              && odd.flatMap { applyHookEvent(st(.runningModel), $0, at: now)?.state } == "failed: unknown")
+
+        let sf = applyHookEvent(st(.runningModel), HookEvent(event: "StopFailure", session_id: "s", error: "rate_limit"), at: now)
+        check("stopFailureGoesFailed", sf?.dot == .failed && sf?.state == "failed: rate limit" && sf?.toolName == nil)
+        check("subagentStopFailureIgnored", dot(.runningModel, HookEvent(event: "StopFailure", session_id: "s", error: "rate_limit", agent_id: "a1")) == .runningModel)
+        check("sessionStartCompactKeepsState", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "compact")) == .runningModel)
+        check("sessionStartStartupGoesWaiting", dot(.runningModel, HookEvent(event: "SessionStart", session_id: "s", source: "startup")) == .waiting)
+        let pc = applyHookEvent(st(.runningTool), HookEvent(event: "PreCompact", session_id: "s", trigger: "auto"), at: now)
+        check("autoPreCompactWhileRunning", pc?.dot == .compacting && pc?.state == "compacting")
+        check("autoPreCompactWhileWaitingIgnored", dot(.waiting, HookEvent(event: "PreCompact", session_id: "s", trigger: "auto")) == .waiting)
+        check("manualPreCompactFromWaiting", dot(.waiting, HookEvent(event: "PreCompact", session_id: "s", trigger: "manual")) == .compacting)
+        check("postCompactAutoResumesRunning", dot(.compacting, HookEvent(event: "PostCompact", session_id: "s", trigger: "auto")) == .runningModel)
+        check("postCompactManualGoesWaiting", dot(.compacting, HookEvent(event: "PostCompact", session_id: "s", trigger: "manual")) == .waiting)
+        check("latePostCompactIgnored", dot(.runningModel, HookEvent(event: "PostCompact", session_id: "s", trigger: "manual")) == .runningModel)
+        check("toolFailureAndDenialGoRunningModel",
+              dot(.runningTool, HookEvent(event: "PostToolUseFailure", session_id: "s")) == .runningModel
+              && dot(.waitingPermission, HookEvent(event: "PermissionDenied", session_id: "s")) == .runningModel)
+        let idleN = HookEvent(event: "Notification", session_id: "s", notification_type: "idle_prompt")
+        check("idlePromptOnlyWhileRunning", dot(.runningTool, idleN) == .waiting && dot(.failed, idleN) == .failed)
+        let permN = HookEvent(event: "Notification", session_id: "s", notification_type: "permission_prompt")
+        let pn = applyHookEvent(st(.runningTool), permN, at: now)
+        check("permissionPromptOnlyWhileRunning", pn?.dot == .waitingPermission && pn?.state == "needs permission" && dot(.waiting, permN) == .waiting)
+        let plainN = HookEvent(event: "Notification", session_id: "s")
+        check("untypedNotificationStillNoop", dot(.runningTool, plainN) == .runningTool && applyHookEvent(nil, plainN, at: now) == nil)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {

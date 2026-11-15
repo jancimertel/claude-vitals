@@ -56,7 +56,7 @@ struct Line: Decodable {
 // MARK: - Derived domain types (all Sendable to cross the actor boundary cleanly)
 
 enum Dot: String, Sendable, Equatable {
-    case runningModel, runningTool, waiting, waitingPermission, idle, ended
+    case runningModel, runningTool, compacting, waiting, waitingPermission, failed, idle, ended
 
     var glyph: String {
         switch self {
@@ -64,11 +64,13 @@ enum Dot: String, Sendable, Equatable {
         case .runningTool:       return "🔧"
         case .waiting:           return "🟡"
         case .waitingPermission: return "🔐"
+        case .compacting:        return "🗜️"
+        case .failed:            return "🔴"
         case .idle:              return "⚪️"
         case .ended:             return "⚫️"
         }
     }
-    var isRunning: Bool { self == .runningModel || self == .runningTool }
+    var isRunning: Bool { self == .runningModel || self == .runningTool || self == .compacting }
 }
 
 /// Incrementally accumulated effort for a single transcript (byte-offset cached).
