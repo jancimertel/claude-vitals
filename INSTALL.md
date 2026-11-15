@@ -6,7 +6,7 @@ Claude Vitals has two parts:
    Works on its own with zero configuration (reads `~/.claude` + the process list).
 2. **The plugin (optional)** - a Claude Code plugin whose hooks push lifecycle events to the
    app for *instant, precise* status (permission prompts, turn/tool transitions, sub-agents).
-   Without it the app still works, just via polling (1.5-5s) instead of push.
+   Without it the app still works, just via file watching instead of push.
 
 ## 1. Build and run the app
 
@@ -61,7 +61,7 @@ run on older builds.
 ## How it works
 
 - **Baseline (always on):** the app tail-parses `~/.claude/projects/*.jsonl` and scrapes the
-  process list, polling every 1.5-5s. This alone drives the whole display.
+  process list, rebuilding on every file change, with a 2-15s backstop poll. This alone drives the whole display.
 - **Hook overlay (when the plugin is installed):** lifecycle events arrive over a Unix domain
   socket (`~/.claude-vitals/vitals.sock`) and become the authoritative, low-latency source of
   session *state*, while the transcript stays the source of tokens/context/cost. Fresh hook

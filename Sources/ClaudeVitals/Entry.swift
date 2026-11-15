@@ -208,6 +208,35 @@ struct Entry {
         let oddUsage = effortOf([#"{"type":"assistant","message":{"id":"o","model":"claude-opus-5-5","usage":{"input_tokens":1000000,"speed":1,"cache_creation":"x"}}}"#])
         check("usageToleratesOddShapes", oddUsage.inTok == 1_000_000 && near(oddUsage.cost, 4))
 
+        // Untimestamped bookkeeping appended after a finished turn is not activity.
+        func linesOf(_ ls: [String]) -> [Line] { parseLines(Data(ls.joined(separator: "\n").utf8), dropFirstPartial: false) }
+        let turnEnd = #"{"type":"assistant","timestamp":"2026-11-15T10:00:00.000Z","message":{"stop_reason":"end_turn"}}"#
+        let costState = #"{"type":"cost-state"}"#
+        let lastPrompt = #"{"type":"last-prompt"}"#
+        check("stampAfterUnstampedTail", lastStamp(linesOf([turnEnd, lastPrompt, costState])) == Date(timeIntervalSince1970: 1_794_736_800))
+        check("noStampWhenLastLineStamped", lastStamp(linesOf([costState, turnEnd])) == nil)
+        let queueOp = #"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T11:00:00.000Z"}"#
+        check("queueOperationIsBookkeeping", lastStamp(linesOf([turnEnd, costState, queueOp])) == Date(timeIntervalSince1970: 1_794_736_800))
+        check("noStampWithoutAnyStamp", lastStamp(linesOf([lastPrompt, costState])) == nil)
+
+        // The watcher fires for a watched dir created after it started (older Claude Code has no
+        // sessions dir), and ignores writes elsewhere under the same parent. The temp dir sits under
+        // /var, which FSEvents reports as /private/var, so this also pins the path canonicalization.
+        let wRoot = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: wRoot, withIntermediateDirectories: true)
+        let wDir = wRoot.appendingPathComponent("sessions")
+        let fired = DispatchSemaphore(value: 0)
+        let watcher = FileWatcher(dirs: [wDir], latency: 0.1) { fired.signal() }
+        watcher.start()
+        Thread.sleep(forTimeInterval: 0.5)                  // FSEvents reports only writes after the stream is live
+        try? Data("x".utf8).write(to: wRoot.appendingPathComponent("other.json"))
+        check("watcherIgnoresSiblings", fired.wait(timeout: .now() + 1.5) == .timedOut)
+        try? FileManager.default.createDirectory(at: wDir, withIntermediateDirectories: true)
+        try? Data("x".utf8).write(to: wDir.appendingPathComponent("1.json"))
+        check("watcherSeesDirCreatedLater", fired.wait(timeout: .now() + 3) == .success)
+        watcher.stop()
+        try? FileManager.default.removeItem(at: wRoot)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {
