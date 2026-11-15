@@ -55,7 +55,7 @@ final class Store: ObservableObject {
         didSet {
             AppTheme.saved = theme
             Theme.current = theme
-            renderedPct = -2                  // same % bucket, new colors: force a re-render
+            renderedKey = []                  // same buckets, new colors: force a re-render
             updateLabelImage()
         }
     }
@@ -64,7 +64,7 @@ final class Store: ObservableObject {
     @Published var menuSource = MenuSource.saved {
         didSet {
             MenuSource.saved = menuSource
-            renderedPct = -2                  // the new window can round to the same %: force a re-render
+            renderedKey = []                  // the new window can round to the same buckets: force a re-render
             updateLabelImage()
         }
     }
@@ -78,7 +78,7 @@ final class Store: ObservableObject {
     private var loadingDone = false               // the first usage fetch returned
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
-    private var renderedPct: Int = -2     // bucket the current label image was rendered for (see updateLabelImage)
+    private var renderedKey: [Int] = []   // buckets the current label image was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
     init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
@@ -120,13 +120,13 @@ final class Store: ObservableObject {
                 let drain = self.limitDrain()
                 for k in 1...12 {
                     let r = 1 - pow(1 - Double(k) / 12, 3)      // ease out
-                    self.label.image = self.renderLabelImage(pct, drain: drain, reveal: r)
+                    self.label.image = self.renderLabelImage(pct, drain: drain, passed: self.ringPassed(), reveal: r)
                     try? await Task.sleep(for: .milliseconds(33))
                 }
             }
             // No data (the fetch failed): cut straight to the no-usage glyph.
             self.loadingLoop = nil
-            self.renderedPct = -2                   // the intro drew over the image: render the real one
+            self.renderedKey = []                   // the intro drew over the image: render the real one
             self.updateLabelImage()
         }
     }
@@ -219,23 +219,35 @@ final class Store: ObservableObject {
         updateLabelImage()
     }
 
-    /// Re-rasterize the menu-bar ring only when the displayed integer % (or presence of usage data)
-    /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
-    /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
+    /// Re-rasterize the menu-bar ring only when the displayed integer %, the time mark's 1% step, or
+    /// the presence of usage data changes. The SwiftUI `ImageRenderer` rasterize is the single most
+    /// expensive per-tick op, and the ring is visually identical within a 1% bucket — so gating here
+    /// removes ~all redundant renders. The poll loop calls this every 2–8s, so the mark moves on
+    /// time: a step is 3 min of the 5h window, ~1.7h of the weekly one.
     private func updateLabelImage() {
         guard loadingLoop == nil else { return }       // the loading animation owns the image
         let pct = freshUsage?.ring(menuSource)?.pct
         let drain = limitDrain()
-        let bucket: Int
+        let passed = ringPassed()
+        let key: [Int]
         if let drain {
-            bucket = 1000 + Int((drain * 100).rounded())     // at the limit: 1000 + % of the wait left
+            key = [1, Int((drain * 100).rounded())]          // at the limit: % of the wait left
+        } else if let pct {
+            key = [0, Int(pct.rounded()), passed.map { Int(($0 * 100).rounded()) } ?? -1]
         } else {
-            // Without usage data: -1 idle, -3 running. Aurora draws that dot itself, on its tile.
-            bucket = pct.map { Int($0.rounded()) } ?? (runningCount > 0 ? -3 : -1)
+            // Without usage data: idle or running. Aurora draws that dot itself, on its tile.
+            key = [2, runningCount > 0 ? 1 : 0]
         }
-        guard bucket != renderedPct else { return }
-        renderedPct = bucket
-        label.image = renderLabelImage(pct, drain: drain)
+        guard key != renderedKey else { return }
+        renderedKey = key
+        label.image = renderLabelImage(pct, drain: drain, passed: passed)
+    }
+
+    /// Share of the ring's window already passed, for its time mark. Nil at the limit (the ring
+    /// shows the wait for the reset instead) or without a reset time.
+    private func ringPassed(now: Date = Date()) -> Double? {
+        guard let w = freshUsage?.ring(menuSource), w.pct < 100 else { return nil }
+        return w.passed(now: now)
     }
 
     /// At the limit, the share of the wait until the reset that's still left: 1 when the app first
@@ -289,7 +301,7 @@ final class Store: ObservableObject {
     /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
     /// icon. `loading` draws the intro's LoadingDot instead, in both themes; `reveal` is the intro's
     /// hand-off to the ring.
-    private func renderLabelImage(_ pct: Double?, drain: Double? = nil,
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, passed: Double? = nil,
                                   trace: (from: Double, to: Double) = (0, 1),
                                   loading: Double? = nil,
                                   reveal: Double = 1) -> NSImage? {
@@ -299,7 +311,7 @@ final class Store: ObservableObject {
         } else if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
             glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, trace: trace,
-                                       reveal: reveal))
+                                       reveal: reveal, passed: passed))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {

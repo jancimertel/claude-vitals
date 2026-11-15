@@ -78,6 +78,9 @@ struct LoaderRing: View {
     /// The menu-bar intro's hand-off (0 → 1): the full outline unwinds to the reading, its gray
     /// turns to the reading's color, and the number fades in.
     var reveal: Double = 1
+    /// Share of the usage window already passed: a dot on the ring at that point, like the time mark
+    /// on the popover's bars. Usage past the dot is ahead of pace. Not shown at the limit.
+    var passed: Double? = nil
 
     private var clamped: Double { min(max(pct, 0), 100) }
     private var reading: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
@@ -96,6 +99,13 @@ struct LoaderRing: View {
                 arc.stroke(color, style: stroke).opacity(reveal)
             }
             .rotationEffect(.degrees(-90))
+            if let passed, clamped < 100 {
+                Circle().fill(Theme.loading(theme))
+                    .frame(width: lineWidth, height: lineWidth)   // as thick as the ring's line
+                    .offset(y: -(size - lineWidth) / 2)          // on the ring's centerline, at 12 o'clock
+                    .rotationEffect(.degrees(passed * 360))     // then clockwise, like the fill
+                    .opacity(reveal)
+            }
             if clamped >= 100 {
                 // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
                 // show a heartbeat trace instead.

@@ -18,8 +18,8 @@ struct RateUsage: Sendable {
     /// the user waits for that one. The percent and its reset always come from the same window, so the
     /// drain counts down to the right time.
     func ring(_ source: MenuSource) -> RingWindow? {
-        let windows = [(fiveH, fiveHReset), (sevenD, sevenDReset)]
-            .compactMap { pct, reset in pct.map { RingWindow(pct: $0, reset: reset) } }
+        let windows = [(fiveH, fiveHReset, 5.0 * 3600), (sevenD, sevenDReset, 7.0 * 86400)]
+            .compactMap { pct, reset, length in pct.map { RingWindow(pct: $0, reset: reset, length: length) } }
         // max(by:) keeps the first of equal elements, so ties go to 5h.
         func highest(_ ws: [RingWindow]) -> RingWindow? { ws.max { $0.pct < $1.pct } }
         let full = windows.filter { $0.pct >= 100 }
@@ -151,8 +151,14 @@ enum MenuSource: String, CaseIterable {
     }
 }
 
-/// One usage window as the ring draws it: its percent and when it resets.
+/// One usage window as the ring draws it: its percent, when it resets, and how long it lasts.
 struct RingWindow: Equatable, Sendable {
     var pct: Double
     var reset: Date?
+    var length: TimeInterval
+
+    /// Share of the window already passed, known only from its reset time.
+    func passed(now: Date = Date()) -> Double? {
+        reset.map { min(max(1 - $0.timeIntervalSince(now) / length, 0), 1) }
+    }
 }
