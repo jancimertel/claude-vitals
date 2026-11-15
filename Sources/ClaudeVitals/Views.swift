@@ -4,15 +4,15 @@ import SwiftUI
 // MARK: - Menu-bar label
 
 struct MenuLabel: View {
-    @ObservedObject var store: Store
+    @ObservedObject var label: MenuLabelModel
     var body: some View {
         HStack(spacing: 3) {
-            if let img = store.labelImage {
+            if let img = label.image {
                 Image(nsImage: img)               // usage loader ring (colored)
             } else {
-                Image(systemName: store.runningCount > 0 ? "circle.fill" : "circle")
+                Image(systemName: label.running > 0 ? "circle.fill" : "circle")
                     .symbolRenderingMode(.multicolor)
-                    .foregroundStyle(store.runningCount > 0 ? Theme.runningModel : .secondary)
+                    .foregroundStyle(label.running > 0 ? Theme.runningModel : .secondary)
             }
             // Just the ring/circle in the menu bar — the running count lives in the popover header.
         }
@@ -78,6 +78,9 @@ struct LoaderRing: View {
     /// The menu-bar intro's hand-off (0 → 1): the full outline unwinds to the reading, its gray
     /// turns to the reading's color, and the number fades in.
     var reveal: Double = 1
+    /// Share of the usage window already passed: a dot on the ring at that point, like the time mark
+    /// on the popover's bars. Usage past the dot is ahead of pace. Not shown at the limit.
+    var passed: Double? = nil
 
     private var clamped: Double { min(max(pct, 0), 100) }
     private var reading: Double { clamped >= 100 ? min(max(drain ?? 1, 0), 1) : clamped / 100 }
@@ -96,6 +99,13 @@ struct LoaderRing: View {
                 arc.stroke(color, style: stroke).opacity(reveal)
             }
             .rotationEffect(.degrees(-90))
+            if let passed, clamped < 100 {
+                Circle().fill(Theme.loading(theme))
+                    .frame(width: lineWidth, height: lineWidth)   // as thick as the ring's line
+                    .offset(y: -(size - lineWidth) / 2)          // on the ring's centerline, at 12 o'clock
+                    .rotationEffect(.degrees(passed * 360))     // then clockwise, like the fill
+                    .opacity(reveal)
+            }
             if clamped >= 100 {
                 // At the limit, which lasts until the reset: "100" doesn't fit inside the ring, so
                 // show a heartbeat trace instead.
@@ -256,7 +266,7 @@ struct PopoverView: View {
     private func columns(_ n: Int) -> Int { n <= 1 ? 1 : n <= 4 ? 2 : 3 }
 
     var body: some View {
-        let blocks = store.snap.blocks
+        let blocks = store.shown.blocks
         let cols = columns(blocks.count)
         let compact = blocks.count > 6
 
@@ -294,6 +304,7 @@ struct PopoverView: View {
         .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
         .background(WindowFitter(size: contentSize))
         .background(WindowVisibilityReader(visible: $visible))
+        .onChange(of: visible) { _, v in store.popoverOpen = v }
         .environment(\.popoverVisible, visible)
     }
 }
@@ -397,12 +408,12 @@ struct HeaderView: View {
     @ObservedObject var store: Store
 
     var body: some View {
-        let s = store.snap
+        let s = store.shown
         HStack(spacing: 12) {
             HStack(spacing: 6) {
-                PulseDot(color: store.runningCount > 0 ? Theme.runningModel : Theme.idle,
-                         active: store.runningCount > 0, size: 8)
-                Text("\(store.runningCount) running")
+                PulseDot(color: s.running > 0 ? Theme.runningModel : Theme.idle,
+                         active: s.running > 0, size: 8)
+                Text("\(s.running) running")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
                     .fixedSize()
             }
@@ -583,9 +594,12 @@ struct PulseDot: View {
     private var pulsing: Bool { active && visible }
     var body: some View {
         Circle().fill(color).frame(width: size, height: size)
-            .opacity(pulsing ? (on ? 0.35 : 1) : 1)
-            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
-                       value: on)
+            // Scoped to opacity: with `.animation(_:value:)` a layout change landing in the same update
+            // (cards catching up as the popover opens) got the endless pulse too, so the dot swung
+            // between its old and new spot, out of its badge.
+            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default) {
+                $0.opacity(pulsing ? (on ? 0.35 : 1) : 1)
+            }
             .onAppear { on = pulsing }
             .id(pulsing)   // new identity drops the in-flight repeatForever; swapping the animation alone doesn't stop it
             .onChange(of: pulsing) { _, nowPulsing in on = nowPulsing }   // restart pulse on each open / idle->running

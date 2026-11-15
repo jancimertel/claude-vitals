@@ -25,16 +25,38 @@ struct TransitionTracker {
     }
 }
 
+/// What the menu-bar label draws.
+@MainActor
+final class MenuLabelModel: ObservableObject {
+    @Published var image: NSImage?   // colored usage-loader glyph (nil -> fall back to dot)
+    @Published var running = 0
+}
+
 @MainActor
 final class Store: ObservableObject {
-    @Published var snap: Snapshot = .empty
+    /// The latest snapshot. Not published: MenuBarExtra keeps the popover's view tree alive while
+    /// it's closed, so publishing every hook event re-rendered the hidden popover. It draws `shown`.
+    private(set) var snap: Snapshot = .empty
+    /// What the popover draws: follows `snap` while the popover is open or the card count changes,
+    /// and catches up as it opens.
+    @Published private(set) var shown: Snapshot = .empty
     @Published var usage: RateUsage?      // real subscription usage (live, from rate-limit headers)
-    @Published var labelImage: NSImage?   // colored usage-loader glyph (nil -> fall back to dot)
+    /// The menu-bar label's state, in its own object so ring animations and the running dot don't
+    /// re-render the popover either.
+    let label = MenuLabelModel()
+
+    var popoverOpen = false {
+        didSet { if popoverOpen { catchUp() } }
+    }
+
+    /// Hand the popover the latest snapshot. Also called on the click that opens it, since the
+    /// visibility notice behind `popoverOpen` lands only after the window is on screen.
+    func catchUp() { shown = snap }
     @Published var theme = AppTheme.saved {
         didSet {
             AppTheme.saved = theme
             Theme.current = theme
-            renderedPct = -2                  // same % bucket, new colors: force a re-render
+            renderedKey = []                  // same buckets, new colors: force a re-render
             updateLabelImage()
         }
     }
@@ -43,8 +65,17 @@ final class Store: ObservableObject {
     @Published var menuSource = MenuSource.saved {
         didSet {
             MenuSource.saved = menuSource
-            renderedPct = -2                  // the new window can round to the same %: force a re-render
+            renderedKey = []                  // the new window can round to the same buckets: force a re-render
             updateLabelImage()
+        }
+    }
+
+    /// Whether the menu-bar ring shows the time mark (see LoaderRing.passed). On unless turned off
+    /// from the right-click menu.
+    @Published var showTimeMark = UserDefaults.standard.object(forKey: "showTimeMark") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showTimeMark, forKey: "showTimeMark")
+            updateLabelImage()                // the mark is part of the render key
         }
     }
 
@@ -57,7 +88,7 @@ final class Store: ObservableObject {
     private var loadingDone = false               // the first usage fetch returned
     private var lastUsageFetch: Date = .distantPast
     private var account = AccountWatcher()
-    private var renderedPct: Int = -2     // bucket the current labelImage was rendered for (see updateLabelImage)
+    private var renderedKey: [Int] = []   // buckets the current label image was rendered for (see updateLabelImage)
     private var socket: EventSocket?
 
     init() { startLoading(); start(); startUsage(); startSocket(); startSweep() }
@@ -84,7 +115,7 @@ final class Store: ObservableObject {
                     grow = t < dotTime ? 0.5 * (1 - pow(1 - t / dotTime, 2))
                                        : 0.5 + 0.5 * (1 - exp(-(t - dotTime) / 0.4))
                     if grow > 0.995 { grow = 1 }
-                    self.labelImage = self.renderLabelImage(nil, loading: grow)
+                    self.label.image = self.renderLabelImage(nil, loading: grow)
                 }
                 try? await Task.sleep(for: .milliseconds(grow < 1 ? 33 : 100))   // grown: just wait
             }
@@ -92,20 +123,20 @@ final class Store: ObservableObject {
             // A fast fetch can land mid-growth: finish it quickly first.
             while grow < 1 {
                 grow = min(grow + 0.15, 1)
-                self.labelImage = self.renderLabelImage(nil, loading: grow)
+                self.label.image = self.renderLabelImage(nil, loading: grow)
                 try? await Task.sleep(for: .milliseconds(33))
             }
             if let pct = self.freshUsage?.ring(self.menuSource)?.pct {
                 let drain = self.limitDrain()
                 for k in 1...12 {
                     let r = 1 - pow(1 - Double(k) / 12, 3)      // ease out
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, reveal: r)
+                    self.label.image = self.renderLabelImage(pct, drain: drain, passed: self.ringPassed(), reveal: r)
                     try? await Task.sleep(for: .milliseconds(33))
                 }
             }
             // No data (the fetch failed): cut straight to the no-usage glyph.
             self.loadingLoop = nil
-            self.renderedPct = -2                   // the intro drew over the image: render the real one
+            self.renderedKey = []                   // the intro drew over the image: render the real one
             self.updateLabelImage()
         }
     }
@@ -191,26 +222,42 @@ final class Store: ObservableObject {
             if AppEnv.isBundled { Notifier.shared.notify(alert) }
         }
         snap = s
+        // While closed, still update when the card count changes: that's what changes the window's
+        // size, and keeping it sized here stops the popover opening at a stale size, then jumping.
+        if popoverOpen || s.blocks.count != shown.blocks.count { shown = s }
+        if label.running != s.running { label.running = s.running }
         updateLabelImage()
     }
 
-    /// Re-rasterize the menu-bar ring only when the displayed integer % (or presence of usage data)
-    /// changes. The SwiftUI `ImageRenderer` rasterize is the single most expensive per-tick op, and the
-    /// ring is visually identical within a 1% bucket — so gating here removes ~all redundant renders.
+    /// Re-rasterize the menu-bar ring only when the displayed integer %, the time mark's 1% step, or
+    /// the presence of usage data changes. The SwiftUI `ImageRenderer` rasterize is the single most
+    /// expensive per-tick op, and the ring is visually identical within a 1% bucket — so gating here
+    /// removes ~all redundant renders. The poll loop calls this every 2–8s, so the mark moves on
+    /// time: a step is 3 min of the 5h window, ~1.7h of the weekly one.
     private func updateLabelImage() {
         guard loadingLoop == nil else { return }       // the loading animation owns the image
         let pct = freshUsage?.ring(menuSource)?.pct
         let drain = limitDrain()
-        let bucket: Int
+        let passed = ringPassed()
+        let key: [Int]
         if let drain {
-            bucket = 1000 + Int((drain * 100).rounded())     // at the limit: 1000 + % of the wait left
+            key = [1, Int((drain * 100).rounded())]          // at the limit: % of the wait left
+        } else if let pct {
+            key = [0, Int(pct.rounded()), passed.map { Int(($0 * 100).rounded()) } ?? -1]
         } else {
-            // Without usage data: -1 idle, -3 running. Aurora draws that dot itself, on its tile.
-            bucket = pct.map { Int($0.rounded()) } ?? (runningCount > 0 ? -3 : -1)
+            // Without usage data: idle or running. Aurora draws that dot itself, on its tile.
+            key = [2, runningCount > 0 ? 1 : 0]
         }
-        guard bucket != renderedPct else { return }
-        renderedPct = bucket
-        labelImage = renderLabelImage(pct, drain: drain)
+        guard key != renderedKey else { return }
+        renderedKey = key
+        label.image = renderLabelImage(pct, drain: drain, passed: passed)
+    }
+
+    /// Share of the ring's window already passed, for its time mark. Nil when the mark is off, at the
+    /// limit (the ring shows the wait for the reset instead), or without a reset time.
+    private func ringPassed(now: Date = Date()) -> Double? {
+        guard showTimeMark, let w = freshUsage?.ring(menuSource), w.pct < 100 else { return nil }
+        return w.passed(now: now)
     }
 
     /// At the limit, the share of the wait until the reset that's still left: 1 when the app first
@@ -247,12 +294,12 @@ final class Store: ObservableObject {
                 guard let self, let pct = self.usage?.ring(self.menuSource)?.pct, let drain = self.limitDrain() else { continue }
                 for k in 1...14 {
                     let t = ease(Double(k) / 14)
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
+                    self.label.image = self.renderLabelImage(pct, drain: drain, trace: (t, 1))
                     try? await Task.sleep(for: .milliseconds(33))
                 }
                 for k in 1...18 {
                     let t = ease(Double(k) / 18)
-                    self.labelImage = self.renderLabelImage(pct, drain: drain, trace: (0, t))
+                    self.label.image = self.renderLabelImage(pct, drain: drain, trace: (0, t))
                     try? await Task.sleep(for: .milliseconds(33))
                 }
             }
@@ -264,7 +311,7 @@ final class Store: ObservableObject {
     /// falls back to Classic's SF Symbol dot. Aurora puts either glyph on a navy tile, like the app
     /// icon. `loading` draws the intro's LoadingDot instead, in both themes; `reveal` is the intro's
     /// hand-off to the ring.
-    private func renderLabelImage(_ pct: Double?, drain: Double? = nil,
+    private func renderLabelImage(_ pct: Double?, drain: Double? = nil, passed: Double? = nil,
                                   trace: (from: Double, to: Double) = (0, 1),
                                   loading: Double? = nil,
                                   reveal: Double = 1) -> NSImage? {
@@ -274,7 +321,7 @@ final class Store: ObservableObject {
         } else if let pct {
             // 22pt in both themes; in Aurora the ring's outer edge meets the rim of its circle.
             glyph = AnyView(LoaderRing(pct: pct, theme: theme, size: 22, drain: drain, trace: trace,
-                                       reveal: reveal))
+                                       reveal: reveal, passed: passed))
         } else if theme == .aurora {
             glyph = AnyView(StatusDot(running: runningCount > 0))
         } else {
