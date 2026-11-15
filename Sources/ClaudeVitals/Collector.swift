@@ -35,10 +35,10 @@ func lsofCwd(_ pid: String) -> String {
     return ""
 }
 
-/// FALLBACK ONLY (see `liveness`): used when Claude Code has no session registry.
+/// FALLBACK ONLY (see `liveness`): used when Claude Code has no session registry directory.
 /// repo cwd -> count of live interactive `claude` processes (absolute tool paths: .app PATH lacks /usr/sbin).
 ///
-/// `pgrep` is cheap and runs every tick; the per-pid `lsof` (the slow call) runs ONLY for pids we
+/// `pgrep` is cheap and runs every tick of the fallback; the per-pid `lsof` (the slow call) runs ONLY for pids we
 /// haven't resolved yet — a process's cwd is fixed for its lifetime, so the result is cached and dead
 /// pids are pruned each tick. Empty results aren't cached, so a pid whose cwd isn't readable yet
 /// (just-spawned, between stat/open) is retried next tick instead of stuck blank.
@@ -254,16 +254,17 @@ struct Liveness {
 
 /// The session registry is the source of liveness: one entry per running session, keyed by session id,
 /// so several sessions in one repo are each live (the process scan could only bless the newest
-/// transcript per repo) and terminal sessions count too. No `pgrep`/`lsof` while the registry reports
-/// a live session. The process scan takes over when the registry has nothing live to say: no directory
-/// (older Claude Code), or a directory the running Claude Code does not populate (a stale one left next
-/// to an older pinned install). That costs one `pgrep` per tick, and only while nothing is live.
-func liveness(cache: CollectorCache) -> Liveness {
-    let entries = readRegistry().filter { isLiveEntry($0) }
-    guard !entries.isEmpty else {
-        let repos = liveRepos(cache: cache)
+/// transcript per repo) and terminal sessions count too. An existing registry directory is
+/// authoritative, so an empty one means nothing is live and there is no `pgrep`/`lsof`; only a missing
+/// directory (older Claude Code) falls back to the process scan, and the accepted cost is that a stale
+/// directory next to an older Claude Code that does not write it shows its sessions ended after 60s quiet.
+func liveness(cache: CollectorCache, dir: URL = SESSIONS_DIR,
+              scan: (CollectorCache) -> [String: Int] = liveRepos) -> Liveness {
+    guard FileManager.default.fileExists(atPath: dir.path) else {
+        let repos = scan(cache)
         return Liveness(files: liveSessionFiles(live: repos), repos: repos, confirmed: false, idle: [])
     }
+    let entries = readRegistry(dir: dir).filter { isLiveEntry($0) }
     var files = Set<String>()
     var repos: [String: Int] = [:]
     var idle = Set<String>()

@@ -38,7 +38,7 @@ extension RegistryEntry {
 }
 
 /// Empty when the directory does not exist (older Claude Code) or holds no readable entry. The caller
-/// treats both the same way: the registry has nothing to say, so it falls back to process scanning.
+/// tells them apart: only a missing directory falls back to process scanning.
 func readRegistry(dir: URL = SESSIONS_DIR) -> [RegistryEntry] {
     guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
         return []

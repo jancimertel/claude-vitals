@@ -36,7 +36,8 @@ check "running pid with a plausible startedAt is live" "$b_old" 1
 
 read -r c_blocks _ <<< "$(run "$FAKE/absent")"
 read -r d_blocks _ <<< "$(run "$EMPTY")"
-check "empty registry falls back like a missing one" "$d_blocks" "$c_blocks"
+if [ "$d_blocks" -le "$c_blocks" ]; then echo "ok    empty registry skips the process scan ($d_blocks <= $c_blocks cards)"
+else echo "FAIL  empty registry skips the process scan ($d_blocks > $c_blocks cards)"; fail=1; fi
 
 read -r r_blocks _ <<< "$(run "$HOME/.claude/sessions")"
 live=$(ls "$HOME"/.claude/sessions/*.json 2>/dev/null | wc -l | tr -d ' ')

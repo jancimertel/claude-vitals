@@ -254,6 +254,17 @@ struct Entry {
         check("registryStatusDecodesTolerantly", regs.map(\.status) == ["idle", nil] && regs.map(\.sessionId) == ["a", "b"])
         try? FileManager.default.removeItem(at: regDir)
 
+        // An existing registry directory is authoritative: empty means nothing is live, so no pgrep.
+        // Only a missing directory (older Claude Code) falls back to the process scan.
+        let liveDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+        var scanned = false
+        _ = liveness(cache: CollectorCache(), dir: liveDir) { _ in scanned = true; return [:] }
+        check("emptyRegistrySkipsProcessScan", !scanned)
+        _ = liveness(cache: CollectorCache(), dir: liveDir.appendingPathComponent("absent")) { _ in scanned = true; return [:] }
+        check("missingRegistryFallsBackToProcessScan", scanned)
+        try? FileManager.default.removeItem(at: liveDir)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {
