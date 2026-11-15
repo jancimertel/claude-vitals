@@ -272,7 +272,9 @@ func liveness(cache: CollectorCache, dir: URL = SESSIONS_DIR,
         repos[e.cwd, default: 0] += 1
         if let path = transcriptPath(for: e) {
             files.insert(path)
-            if e.status == "idle" { idle.insert(path) }
+            // shell = idle while a background Bash task runs, so the turn is over just like idle.
+            // busy (loading or background agents) and waiting (a dialog is up) get no shortcut.
+            if e.status == "idle" || e.status == "shell" { idle.insert(path) }
         }
     }
     return Liveness(files: files, repos: repos, confirmed: true, idle: idle)

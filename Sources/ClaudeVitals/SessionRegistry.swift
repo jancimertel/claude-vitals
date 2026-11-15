@@ -20,7 +20,8 @@ struct RegistryEntry: Decodable, Sendable, Equatable {
     let sessionId: String
     let cwd: String
     let startedAt: Double?   // ms since epoch; nil disables the pid-reuse check for that entry
-    /// "busy" or "idle"; Claude Code writes idle right after a turn's Stop hooks finish.
+    /// "busy" (loading or background agents active), "idle" (written right after a turn's Stop hooks
+    /// finish), "waiting" (a dialog is up) or "shell" (idle while a background Bash task runs).
     var status: String? = nil
 }
 
