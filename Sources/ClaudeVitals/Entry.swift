@@ -237,6 +237,34 @@ struct Entry {
         watcher.stop()
         try? FileManager.default.removeItem(at: wRoot)
 
+        // Claude Code flips its registry status to idle right after a turn's Stop hooks finish, so an
+        // end_turn under idle is finished now, not after LIVE_FILE_S of quiet. Nothing else shortcuts.
+        check("registryIdleEndTurnWaitsAtOnce",
+              deriveState(lastType: "assistant", lastStop: "end_turn", asksUser: false, age: 0.5, isLive: true, registryIdle: true) == (.waiting, "waiting prompt")
+              && deriveState(lastType: "assistant", lastStop: "end_turn", asksUser: false, age: 0.5, isLive: true) == (.runningModel, "running"))
+        check("registryIdleDoesNotShortcutToolUse",
+              deriveState(lastType: "assistant", lastStop: "tool_use", asksUser: false, age: 0.5, isLive: true, registryIdle: true) == (.runningTool, "running tool"))
+        check("registryIdleDoesNotShortcutNewTurn",
+              deriveState(lastType: "user", lastStop: nil, asksUser: false, age: 0.5, isLive: true, registryIdle: true) == (.runningModel, "running model"))
+        let regDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: regDir, withIntermediateDirectories: true)
+        try? Data(#"{"pid":1,"sessionId":"a","cwd":"/r","status":"idle"}"#.utf8).write(to: regDir.appendingPathComponent("1.json"))
+        try? Data(#"{"pid":2,"sessionId":"b","cwd":"/r","status":5}"#.utf8).write(to: regDir.appendingPathComponent("2.json"))
+        let regs = readRegistry(dir: regDir).sorted { $0.pid < $1.pid }
+        check("registryStatusDecodesTolerantly", regs.map(\.status) == ["idle", nil] && regs.map(\.sessionId) == ["a", "b"])
+        try? FileManager.default.removeItem(at: regDir)
+
+        // An existing registry directory is authoritative: empty means nothing is live, so no pgrep.
+        // Only a missing directory (older Claude Code) falls back to the process scan.
+        let liveDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try? FileManager.default.createDirectory(at: liveDir, withIntermediateDirectories: true)
+        var scanned = false
+        _ = liveness(cache: CollectorCache(), dir: liveDir) { _ in scanned = true; return [:] }
+        check("emptyRegistrySkipsProcessScan", !scanned)
+        _ = liveness(cache: CollectorCache(), dir: liveDir.appendingPathComponent("absent")) { _ in scanned = true; return [:] }
+        check("missingRegistryFallsBackToProcessScan", scanned)
+        try? FileManager.default.removeItem(at: liveDir)
+
         // Menu-bar ring window: the chosen window below the limit, the blocking one at it.
         let r1h = now.addingTimeInterval(3600), r3d = now.addingTimeInterval(3 * 86400)
         func u(_ f: Double?, _ fr: Date?, _ w: Double?, _ wr: Date?) -> RateUsage {

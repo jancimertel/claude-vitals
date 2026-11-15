@@ -35,10 +35,10 @@ func lsofCwd(_ pid: String) -> String {
     return ""
 }
 
-/// FALLBACK ONLY (see `liveness`): used when Claude Code has no session registry.
+/// FALLBACK ONLY (see `liveness`): used when Claude Code has no session registry directory.
 /// repo cwd -> count of live interactive `claude` processes (absolute tool paths: .app PATH lacks /usr/sbin).
 ///
-/// `pgrep` is cheap and runs every tick; the per-pid `lsof` (the slow call) runs ONLY for pids we
+/// `pgrep` is cheap and runs every tick of the fallback; the per-pid `lsof` (the slow call) runs ONLY for pids we
 /// haven't resolved yet — a process's cwd is fixed for its lifetime, so the result is cached and dead
 /// pids are pruned each tick. Empty results aren't cached, so a pid whose cwd isn't readable yet
 /// (just-spawned, between stat/open) is retried next tick instead of stuck blank.
@@ -139,8 +139,10 @@ func headMetaCached(_ path: String, cache: CollectorCache) -> (cwd: String, bran
 /// session that's actively being written is never mislabeled when liveness detection misses its process
 /// (observed on the `pgrep` fallback, which misses some live VS Code `claude` processes). The old code returned "waiting
 /// prompt" for ANY `end_turn` at any age, so a session that finished 15 min ago looked like a live
-/// agent awaiting input — the stale-card bug.
-func deriveState(lastType: String?, lastStop: String?, asksUser: Bool, age: TimeInterval, isLive: Bool) -> (Dot, String) {
+/// agent awaiting input - the stale-card bug. `registryIdle` (the session registry says idle) ends an
+/// `end_turn` at once instead of after the LIVE_FILE_S quiet window.
+func deriveState(lastType: String?, lastStop: String?, asksUser: Bool, age: TimeInterval, isLive: Bool,
+                 registryIdle: Bool = false) -> (Dot, String) {
     // No conversational line yet (freshly created / mid-first-write) -> not "running".
     guard let t = lastType else { return (.idle, "idle") }
     let stop = lastStop
@@ -148,6 +150,9 @@ func deriveState(lastType: String?, lastStop: String?, asksUser: Bool, age: Time
     // the user answers — on disk it's indistinguishable from a running tool, but it's actually waiting
     // for the user. True at any age (the question may have been posed this second or minutes ago).
     if t == "assistant", stop == "tool_use", asksUser { return (.waiting, "waiting prompt") }
+    // Claude Code writes registry status idle right after the turn's Stop hooks finish, so the turn
+    // is over now. Without it, the LIVE_FILE_S quiet window below has to stand in for that signal.
+    if registryIdle, t == "assistant", stop == "end_turn" { return (.waiting, "waiting prompt") }
     if age < LIVE_FILE_S {                                  // written this second -> actively running
         if t == "assistant", stop == "tool_use" { return (.runningTool, "running tool") }
         if t == "user" { return (.runningModel, "running model") }
@@ -243,27 +248,36 @@ struct Liveness {
     /// True when the registry named this exact session; false when the process scan guessed the
     /// newest transcript per repo.
     let confirmed: Bool
+    /// Transcripts whose registry entry reports idle.
+    let idle: Set<String>
 }
 
 /// The session registry is the source of liveness: one entry per running session, keyed by session id,
 /// so several sessions in one repo are each live (the process scan could only bless the newest
-/// transcript per repo) and terminal sessions count too. No `pgrep`/`lsof` while the registry reports
-/// a live session. The process scan takes over when the registry has nothing live to say: no directory
-/// (older Claude Code), or a directory the running Claude Code does not populate (a stale one left next
-/// to an older pinned install). That costs one `pgrep` per tick, and only while nothing is live.
-func liveness(cache: CollectorCache) -> Liveness {
-    let entries = readRegistry().filter { isLiveEntry($0) }
-    guard !entries.isEmpty else {
-        let repos = liveRepos(cache: cache)
-        return Liveness(files: liveSessionFiles(live: repos), repos: repos, confirmed: false)
+/// transcript per repo) and terminal sessions count too. An existing registry directory is
+/// authoritative, so an empty one means nothing is live and there is no `pgrep`/`lsof`; only a missing
+/// directory (older Claude Code) falls back to the process scan, and the accepted cost is that a stale
+/// directory next to an older Claude Code that does not write it shows its sessions ended after 60s quiet.
+func liveness(cache: CollectorCache, dir: URL = SESSIONS_DIR,
+              scan: (CollectorCache) -> [String: Int] = liveRepos) -> Liveness {
+    guard FileManager.default.fileExists(atPath: dir.path) else {
+        let repos = scan(cache)
+        return Liveness(files: liveSessionFiles(live: repos), repos: repos, confirmed: false, idle: [])
     }
+    let entries = readRegistry(dir: dir).filter { isLiveEntry($0) }
     var files = Set<String>()
     var repos: [String: Int] = [:]
+    var idle = Set<String>()
     for e in entries {
         repos[e.cwd, default: 0] += 1
-        if let path = transcriptPath(for: e) { files.insert(path) }
+        if let path = transcriptPath(for: e) {
+            files.insert(path)
+            // shell = idle while a background Bash task runs, so the turn is over just like idle.
+            // busy (loading or background agents) and waiting (a dialog is up) get no shortcut.
+            if e.status == "idle" || e.status == "shell" { idle.insert(path) }
+        }
     }
-    return Liveness(files: files, repos: repos, confirmed: true)
+    return Liveness(files: files, repos: repos, confirmed: true, idle: idle)
 }
 
 /// Every PROJ/*/*.jsonl touched < RECENT_WINDOW (grace), plus every live session's transcript (always),
@@ -381,7 +395,8 @@ func buildSnapshot(parser: TranscriptParser, cache: CollectorCache,
         let cwd = headCwd.isEmpty ? (liveMatch?.key ?? "") : headCwd
         let repo = cwd.isEmpty ? dirName : URL(fileURLWithPath: cwd).lastPathComponent
 
-        let heuristic = deriveState(lastType: ps.lastType, lastStop: ps.lastStop, asksUser: ps.asksUser, age: age, isLive: heuristicIsLive)
+        let heuristic = deriveState(lastType: ps.lastType, lastStop: ps.lastStop, asksUser: ps.asksUser, age: age, isLive: heuristicIsLive,
+                                    registryIdle: liveNow.idle.contains(f))
         let resolved = resolveState(heuristic: (heuristic.0, heuristic.1), isLive: heuristicIsLive,
                                     liveConfirmed: liveNow.confirmed && heuristicIsLive,
                                     hook: hooks[sessionId], transcriptMtime: lastActive, now: now)

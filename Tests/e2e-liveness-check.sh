@@ -5,7 +5,6 @@
 # Writes only into fresh mktemp dirs. Each --dump makes one tiny usage call, so allow a few seconds per line.
 BIN=.build/debug/ClaudeVitals
 FAKE="$(mktemp -d)/sessions";  mkdir -p "$FAKE"
-EMPTY="$(mktemp -d)/sessions"; mkdir -p "$EMPTY"
 # Oldest transcript whose last line has a timestamp and is not a queue-operation: one ending in untimestamped bookkeeping is aged
 # from its last timestamped line (lastStamp in Collector.swift), so its card would not show the mtime age.
 # Oldest also means far outside the grace window.
@@ -33,10 +32,6 @@ check "dead pid and reused pid are not live" "$a_old" 0
 printf '{"pid":%s,"sessionId":"%s","cwd":"/nonexistent","startedAt":%s}' "$$" "$SID" "$NOW_MS" > "$FAKE/$$.json"
 read -r _ b_old <<< "$(run "$FAKE")"
 check "running pid with a plausible startedAt is live" "$b_old" 1
-
-read -r c_blocks _ <<< "$(run "$FAKE/absent")"
-read -r d_blocks _ <<< "$(run "$EMPTY")"
-check "empty registry falls back like a missing one" "$d_blocks" "$c_blocks"
 
 read -r r_blocks _ <<< "$(run "$HOME/.claude/sessions")"
 live=$(ls "$HOME"/.claude/sessions/*.json 2>/dev/null | wc -l | tr -d ' ')

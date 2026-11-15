@@ -183,8 +183,8 @@ final class Store: ObservableObject {
                 if self.dirty { continue }            // a write landed mid-rebuild and may not be in `s`
                 let busy = s.running > 0 || s.subsRunning > 0
                 // Writes wake the loop (refreshNow), so the poll only catches what no write announces.
-                // 2s keeps the 5s running -> waiting flip (LIVE_FILE_S) prompt for sessions without hooks,
-                // and the open popover's "Ns ago" moving. Otherwise 15s.
+                // 2s still serves turns whose registry status stays busy (background agents), sessions
+                // without a registry, and the open popover's "Ns ago". Otherwise 15s.
                 let interval: Double = self.popoverOpen || (busy && !s.hookDriven) ? 2 : 15
                 let nap = Task<Void, Never> { try? await Task.sleep(for: .seconds(interval)) }
                 self.nap = nap

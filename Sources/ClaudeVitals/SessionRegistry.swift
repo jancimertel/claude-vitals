@@ -13,16 +13,33 @@ let SESSIONS_DIR: URL = ProcessInfo.processInfo.environment["CLAUDE_VITALS_SESSI
 let PID_REUSE_SKEW_S: TimeInterval = 5
 
 /// The subset of a registry file this app uses. The format is internal to Claude Code, so decoding is
-/// tolerant: unknown fields are ignored, and an entry missing pid/sessionId/cwd is skipped, not fatal.
+/// tolerant: unknown fields are ignored, an entry missing pid/sessionId/cwd is skipped, not fatal, and a
+/// missing or wrong-typed `status` is just nil.
 struct RegistryEntry: Decodable, Sendable, Equatable {
     let pid: Int32
     let sessionId: String
     let cwd: String
     let startedAt: Double?   // ms since epoch; nil disables the pid-reuse check for that entry
+    /// "busy" (loading or background agents active), "idle" (written right after a turn's Stop hooks
+    /// finish), "waiting" (a dialog is up) or "shell" (idle while a background Bash task runs).
+    var status: String? = nil
+}
+
+extension RegistryEntry {
+    private enum CodingKeys: String, CodingKey { case pid, sessionId, cwd, startedAt, status }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        pid = try c.decode(Int32.self, forKey: .pid)
+        sessionId = try c.decode(String.self, forKey: .sessionId)
+        cwd = try c.decode(String.self, forKey: .cwd)
+        startedAt = try c.decodeIfPresent(Double.self, forKey: .startedAt)
+        status = (try? c.decodeIfPresent(String.self, forKey: .status)) ?? nil
+    }
 }
 
 /// Empty when the directory does not exist (older Claude Code) or holds no readable entry. The caller
-/// treats both the same way: the registry has nothing to say, so it falls back to process scanning.
+/// tells them apart: only a missing directory falls back to process scanning.
 func readRegistry(dir: URL = SESSIONS_DIR) -> [RegistryEntry] {
     guard let files = try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil) else {
         return []
