@@ -36,7 +36,8 @@ final class Store: ObservableObject {
     /// The latest snapshot. Not published: MenuBarExtra keeps the popover's view tree alive while
     /// it's closed, so publishing every hook event re-rendered the hidden popover. It draws `shown`.
     private(set) var snap: Snapshot = .empty
-    /// What the popover draws: follows `snap` only while the popover is open, and catches up as it opens.
+    /// What the popover draws: follows `snap` while the popover is open or the card count changes,
+    /// and catches up as it opens.
     @Published private(set) var shown: Snapshot = .empty
     @Published var usage: RateUsage?      // real subscription usage (live, from rate-limit headers)
     /// The menu-bar label's state, in its own object so ring animations and the running dot don't
@@ -211,7 +212,9 @@ final class Store: ObservableObject {
             if AppEnv.isBundled { Notifier.shared.notify(alert) }
         }
         snap = s
-        if popoverOpen { shown = s }
+        // While closed, still update when the card count changes: that's what changes the window's
+        // size, and keeping it sized here stops the popover opening at a stale size, then jumping.
+        if popoverOpen || s.blocks.count != shown.blocks.count { shown = s }
         if label.running != s.running { label.running = s.running }
         updateLabelImage()
     }
