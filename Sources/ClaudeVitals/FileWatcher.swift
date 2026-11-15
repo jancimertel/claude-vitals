@@ -3,7 +3,8 @@ import Foundation
 
 /// Calls `onChange` (on its own queue) when anything under one of `dirs` changes: one FSEvents stream,
 /// events coalesced over `latency` seconds. It watches each dir's parent and filters by path, so a dir
-/// that does not exist yet (older Claude Code has no sessions dir) still reports once it is created.
+/// that does not exist yet (older Claude Code has no sessions dir) still reports once something is written
+/// inside it: events are per directory, and the dir's own creation shows up only as an event on the parent.
 /// Nothing is read here; the caller rebuilds its snapshot.
 final class FileWatcher {
     private let dirs: [URL]
@@ -31,7 +32,7 @@ final class FileWatcher {
     func start() {
         guard stream == nil else { return }
         let box = Box(prefixes: dirs.map { FileWatcher.canonical($0) + "/" }, onChange: onChange)
-        let roots = Array(Set(dirs.map { FileWatcher.canonical($0.deletingLastPathComponent()) }))
+        let roots = Array(Set(dirs.map { URL(fileURLWithPath: FileWatcher.canonical($0)).deletingLastPathComponent().path }))
         var ctx = FSEventStreamContext(
             version: 0, info: Unmanaged.passRetained(box).toOpaque(), retain: nil,
             release: { info in if let info { Unmanaged<Box>.fromOpaque(info).release() } },

@@ -6,10 +6,10 @@
 BIN=.build/debug/ClaudeVitals
 FAKE="$(mktemp -d)/sessions";  mkdir -p "$FAKE"
 EMPTY="$(mktemp -d)/sessions"; mkdir -p "$EMPTY"
-# Oldest transcript whose last line has a timestamp: one ending in untimestamped bookkeeping is aged
+# Oldest transcript whose last line has a timestamp and is not a queue-operation: one ending in untimestamped bookkeeping is aged
 # from its last timestamped line (lastStamp in Collector.swift), so its card would not show the mtime age.
 # Oldest also means far outside the grace window.
-OLD=$(ls -tr "$HOME"/.claude/projects/*/*.jsonl | while read -r f; do tail -n 1 "$f" | grep -q '"timestamp"' && { echo "$f"; break; }; done)
+OLD=$(ls -tr "$HOME"/.claude/projects/*/*.jsonl | while read -r f; do tail -n 1 "$f" | grep '"timestamp"' | grep -qv 'queue-operation' && { echo "$f"; break; }; done)
 SID=$(basename "$OLD" .jsonl)
 NOW_MS=$(( $(date +%s) * 1000 ))
 

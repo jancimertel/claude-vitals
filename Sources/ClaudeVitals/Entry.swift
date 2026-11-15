@@ -215,6 +215,8 @@ struct Entry {
         let lastPrompt = #"{"type":"last-prompt"}"#
         check("stampAfterUnstampedTail", lastStamp(linesOf([turnEnd, lastPrompt, costState])) == Date(timeIntervalSince1970: 1_794_736_800))
         check("noStampWhenLastLineStamped", lastStamp(linesOf([costState, turnEnd])) == nil)
+        let queueOp = #"{"type":"queue-operation","operation":"enqueue","timestamp":"2026-11-15T11:00:00.000Z"}"#
+        check("queueOperationIsBookkeeping", lastStamp(linesOf([turnEnd, costState, queueOp])) == Date(timeIntervalSince1970: 1_794_736_800))
         check("noStampWithoutAnyStamp", lastStamp(linesOf([lastPrompt, costState])) == nil)
 
         // The watcher fires for a watched dir created after it started (older Claude Code has no
