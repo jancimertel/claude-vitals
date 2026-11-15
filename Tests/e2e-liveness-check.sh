@@ -33,7 +33,6 @@ printf '{"pid":%s,"sessionId":"%s","cwd":"/nonexistent","startedAt":%s}' "$$" "$
 read -r _ b_old <<< "$(run "$FAKE")"
 check "running pid with a plausible startedAt is live" "$b_old" 1
 
-
 read -r r_blocks _ <<< "$(run "$HOME/.claude/sessions")"
 live=$(ls "$HOME"/.claude/sessions/*.json 2>/dev/null | wc -l | tr -d ' ')
 if [ "$r_blocks" -ge "$live" ]; then echo "ok    real registry: $r_blocks cards for $live registry entries"

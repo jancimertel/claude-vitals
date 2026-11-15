@@ -60,8 +60,8 @@ run on older builds.
 
 ## How it works
 
-- **Baseline (always on):** the app tail-parses `~/.claude/projects/*.jsonl` and scrapes the
-  process list, rebuilding on every file change, with a 2-15s backstop poll. This alone drives the whole display.
+- **Baseline (always on):** the app tail-parses `~/.claude/projects/*.jsonl` and reads the
+  session registry (process list only on older Claude Code without `~/.claude/sessions`), rebuilding on every file change, with a 2-15s backstop poll. This alone drives the whole display.
 - **Hook overlay (when the plugin is installed):** lifecycle events arrive over a Unix domain
   socket (`~/.claude-vitals/vitals.sock`) and become the authoritative, low-latency source of
   session *state*, while the transcript stays the source of tokens/context/cost. Fresh hook
