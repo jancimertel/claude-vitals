@@ -69,6 +69,15 @@ final class Store: ObservableObject {
         }
     }
 
+    /// Whether the menu-bar ring shows the time mark (see LoaderRing.passed). On unless turned off
+    /// from the right-click menu.
+    @Published var showTimeMark = UserDefaults.standard.object(forKey: "showTimeMark") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(showTimeMark, forKey: "showTimeMark")
+            updateLabelImage()                // the mark is part of the render key
+        }
+    }
+
     private let collector = Collector()
     private var tracker = TransitionTracker()
     private var loop: Task<Void, Never>?
@@ -243,10 +252,10 @@ final class Store: ObservableObject {
         label.image = renderLabelImage(pct, drain: drain, passed: passed)
     }
 
-    /// Share of the ring's window already passed, for its time mark. Nil at the limit (the ring
-    /// shows the wait for the reset instead) or without a reset time.
+    /// Share of the ring's window already passed, for its time mark. Nil when the mark is off, at the
+    /// limit (the ring shows the wait for the reset instead), or without a reset time.
     private func ringPassed(now: Date = Date()) -> Double? {
-        guard let w = freshUsage?.ring(menuSource), w.pct < 100 else { return nil }
+        guard showTimeMark, let w = freshUsage?.ring(menuSource), w.pct < 100 else { return nil }
         return w.passed(now: now)
     }
 
