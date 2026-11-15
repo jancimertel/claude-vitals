@@ -11,6 +11,35 @@ struct RateUsage: Sendable {
     var capturedAt: Date
 
     var maxPct: Double? { [fiveH, sevenD].compactMap { $0 }.max() }
+
+    /// What the menu-bar ring shows: always the 5h session window — the limit that actually gates
+    /// day-to-day work. Falls back to the weekly value only when 5h is missing from the headers.
+    var menuPct: Double? { fiveH ?? sevenD }
+}
+
+/// Tracks which Claude account is logged in, via `oauthAccount.accountUuid` in ~/.claude.json, which
+/// `/login` rewrites. Reading this file instead of the Keychain avoids a `security` call (and a possible
+/// Keychain prompt) on every check. Claude Code writes the file often, so it's re-parsed only when its
+/// mtime changes.
+struct AccountWatcher {
+    private static let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".claude.json")
+    private var mtime: Date?
+    private var accountId: String?
+    private var seen = false
+
+    /// True when the logged-in account differs from the one seen on the previous call. The first
+    /// successful read only records the account: launch already fetches usage on its own.
+    mutating func changed() -> Bool {
+        guard let m = (try? FileManager.default.attributesOfItem(atPath: Self.url.path))?[.modificationDate] as? Date,
+              m != mtime else { return false }
+        // A half-written file fails to parse: leave mtime alone so the next tick retries.
+        guard let data = try? Data(contentsOf: Self.url),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        mtime = m
+        let id = (obj["oauthAccount"] as? [String: Any])?["accountUuid"] as? String
+        defer { accountId = id; seen = true }
+        return seen && id != accountId
+    }
 }
 
 /// Reads usage via the Claude Code OAuth token from the Keychain + a minimal /v1/messages call.

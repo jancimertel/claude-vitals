@@ -100,6 +100,12 @@ struct UsageStripView: View {
 
 struct PopoverView: View {
     @ObservedObject var store: Store
+    @State private var visible = false
+    @State private var gridHeight: CGFloat = 0
+    @State private var contentSize: CGSize = .zero
+
+    /// Room left for the grid under the header, usage strip and footer.
+    private var maxGridHeight: CGFloat { (NSScreen.main?.visibleFrame.height ?? 800) - 200 }
 
     private func columns(_ n: Int) -> Int { n <= 1 ? 1 : n <= 4 ? 2 : 3 }
 
@@ -125,16 +131,101 @@ struct PopoverView: View {
                         ForEach(blocks) { SessionCardView(block: $0, compact: compact) }
                     }
                     .padding(12)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { gridHeight = $0 }
                 }
-                .frame(maxHeight: 560)
+                // Show every card; scroll only once the grid would run off the screen.
+                .frame(height: min(gridHeight, maxGridHeight))
             }
 
             Divider().overlay(Theme.hairline)
-            FooterView(store: store)
+            FooterView(store: store, narrow: cols == 1)
         }
         .frame(width: CGFloat(cols) * 264 + CGFloat(cols - 1) * 10 + 24)
+        .fixedSize(horizontal: false, vertical: true)
         .background(Theme.bgWindow.opacity(0.92))
         .background(.ultraThinMaterial)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { contentSize = $0 }
+        .background(WindowFitter(size: contentSize))
+        .background(WindowVisibilityReader(visible: $visible))
+        .environment(\.popoverVisible, visible)
+    }
+}
+
+// MARK: - Popover window sizing
+
+/// MenuBarExtra sizes its window once and doesn't follow later content changes: it keeps the
+/// launch-time height (clipping the cards) or a 2-column width after dropping to 1 column.
+/// Resize it to the content ourselves, keeping the top and right edges under the menu-bar item.
+struct WindowFitter: NSViewRepresentable {
+    let size: CGSize
+
+    func makeNSView(context: Context) -> NSView { NSView() }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let size = size
+        DispatchQueue.main.async {
+            guard size.width > 0, size.height > 0, let window = nsView.window,
+                  let screen = window.screen ?? NSScreen.main else { return }
+            let bounds = screen.visibleFrame
+            var frame = window.frameRect(forContentRect: NSRect(origin: .zero, size: size))
+            let top = window.frame.maxY
+            frame.size.height = min(frame.height, top - bounds.minY)
+            frame.origin.x = max(bounds.minX, min(window.frame.maxX, bounds.maxX) - frame.width)
+            frame.origin.y = top - frame.height
+            if frame != window.frame { window.setFrame(frame, display: true) }
+        }
+    }
+}
+
+// MARK: - Popover visibility
+
+private struct PopoverVisibleKey: EnvironmentKey {
+    static let defaultValue = true
+}
+
+extension EnvironmentValues {
+    /// False while the MenuBarExtra window is closed. Its view tree stays alive when closed, so
+    /// anything that animates continuously must check this or it redraws the hidden window every frame.
+    var popoverVisible: Bool {
+        get { self[PopoverVisibleKey.self] }
+        set { self[PopoverVisibleKey.self] = newValue }
+    }
+}
+
+/// Tracks whether the hosting window is on screen. onAppear/onDisappear are unreliable inside
+/// MenuBarExtra windows, so this watches the NSWindow's occlusion state directly.
+struct WindowVisibilityReader: NSViewRepresentable {
+    @Binding var visible: Bool
+
+    func makeNSView(context: Context) -> NSView {
+        let view = ObservingView()
+        view.onChange = { v in DispatchQueue.main.async { if visible != v { visible = v } } }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {}
+
+    final class ObservingView: NSView {
+        var onChange: ((Bool) -> Void)?
+        nonisolated(unsafe) private var token: NSObjectProtocol?   // only touched on main + in deinit
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            if let token { NotificationCenter.default.removeObserver(token) }
+            token = nil
+            guard let window else { onChange?(false); return }
+            token = NotificationCenter.default.addObserver(
+                forName: NSWindow.didChangeOcclusionStateNotification, object: window, queue: .main
+            ) { [weak self] _ in MainActor.assumeIsolated { self?.report() } }   // queue: .main
+            report()
+        }
+
+        private func report() {
+            guard let window else { return }
+            onChange?(window.isVisible && window.occlusionState.contains(.visible))
+        }
+
+        deinit { if let token { NotificationCenter.default.removeObserver(token) } }
     }
 }
 
@@ -151,6 +242,7 @@ struct HeaderView: View {
                          active: store.runningCount > 0, size: 8)
                 Text("\(store.runningCount) running")
                     .font(.system(size: 13, weight: .semibold)).foregroundStyle(Theme.textPrimary)
+                    .fixedSize()
             }
             if s.subsRunning > 0 {
                 HStack(spacing: 5) {
@@ -306,14 +398,18 @@ struct PulseDot: View {
     let color: Color
     let active: Bool
     var size: CGFloat = 8
+    @Environment(\.popoverVisible) private var visible
     @State private var on = false
+    // Pulse only while on screen: a repeatForever animation in the hidden popover costs ~20% CPU.
+    private var pulsing: Bool { active && visible }
     var body: some View {
         Circle().fill(color).frame(width: size, height: size)
-            .opacity(active ? (on ? 0.35 : 1) : 1)
-            .animation(active ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
+            .opacity(pulsing ? (on ? 0.35 : 1) : 1)
+            .animation(pulsing ? .easeInOut(duration: 0.9).repeatForever(autoreverses: true) : .default,
                        value: on)
-            .onAppear { on = active }
-            .onChange(of: active) { _, nowActive in on = nowActive }   // restart pulse on idle->running cycles
+            .onAppear { on = pulsing }
+            .id(pulsing)   // new identity drops the in-flight repeatForever; swapping the animation alone doesn't stop it
+            .onChange(of: pulsing) { _, nowPulsing in on = nowPulsing }   // restart pulse on each open / idle->running
     }
 }
 
@@ -334,17 +430,28 @@ struct EmptyStateView: View {
 struct FooterView: View {
     @ObservedObject var store: Store
     @State private var launch = LaunchAtLogin.isEnabled
+    var narrow = false                                 // single-column popover: drop the Refresh title to fit
+    @State private var sound = Chime.enabled
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: narrow ? 10 : 12) {
             Button { store.refreshNow() } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+                if narrow {
+                    Image(systemName: "arrow.clockwise")
+                } else {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
             }
             .buttonStyle(.plain)
+            .help("Refresh")
+
+            Toggle("Sound", isOn: $sound)
+                .toggleStyle(.switch).controlSize(.mini).fixedSize()
+                .onChange(of: sound) { _, newValue in Chime.enabled = newValue }
 
             if LaunchAtLogin.available {
                 Toggle("Launch at login", isOn: $launch)
-                    .toggleStyle(.switch).controlSize(.mini)
+                    .toggleStyle(.switch).controlSize(.mini).fixedSize()
                     .onChange(of: launch) { _, newValue in LaunchAtLogin.set(newValue) }
             }
 

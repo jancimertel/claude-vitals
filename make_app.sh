@@ -9,6 +9,17 @@ BIN="ClaudeVitals"
 BUNDLE_ID="com.janci.claudevitals"
 VERSION="0.1.0"
 
+# Command Line Tools ship no SwiftUI macro plugin, and from the macOS 27 SDK on @State is a
+# macro, so builds fail with "plugin for module 'SwiftUIMacros' not found". Without Xcode,
+# fall back to the newest installed macOS 26 SDK, where @State is still a property wrapper.
+if [[ -z "${SDKROOT:-}" && "$(xcode-select -p)" == */CommandLineTools ]]; then
+    SDK="$(ls -d /Library/Developer/CommandLineTools/SDKs/MacOSX26.*.sdk 2>/dev/null | sort -V | tail -1 || true)"
+    if [[ -n "$SDK" ]]; then
+        export SDKROOT="$SDK"
+        echo "==> Command Line Tools only: building against $(basename "$SDK")"
+    fi
+fi
+
 echo "==> swift build -c release"
 swift build -c release
 BINPATH="$(swift build -c release --show-bin-path)/$BIN"

@@ -4,7 +4,14 @@ import UserNotifications
 
 /// System chime on running->waiting (works unbundled — the robust fallback).
 enum Chime {
-    static func play() { NSSound(named: "Glass")?.play() }
+    static var enabled: Bool {
+        get { UserDefaults.standard.bool(forKey: "chimeEnabled") }
+        set { UserDefaults.standard.set(newValue, forKey: "chimeEnabled") }
+    }
+    static func play() {
+        guard enabled else { return }
+        NSSound(named: "Glass")?.play()
+    }
 }
 
 /// UNUserNotifications. CRASHES with no bundle id, so every call is guarded by AppEnv.isBundled.
