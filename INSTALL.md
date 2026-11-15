@@ -15,9 +15,12 @@ Requires macOS 14+ and the Swift toolchain (Xcode Command Line Tools: `xcode-sel
 ```bash
 git clone https://github.com/jancimertel/claude-vitals.git
 cd claude-vitals
-./make_app.sh          # builds release + ad-hoc-signs ClaudeVitals.app
-open ClaudeVitals.app  # menu-bar glyph appears
+./make_app.sh          # builds release + ad-hoc-signs "Claude Vitals.app"
+open "Claude Vitals.app"  # menu-bar glyph appears
 ```
+
+To keep it in `/Applications` (Spotlight, Launchpad), use `./make_app.sh --install` instead. It
+moves the build there and relaunches it; rerun it after each change.
 
 Dev run without bundling: `swift run ClaudeVitals` (or `swift run ClaudeVitals --dump` for a headless snapshot).
 
